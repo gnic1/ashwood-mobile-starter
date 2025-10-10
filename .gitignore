@@ -1,0 +1,33 @@
+# Node / package managers
+node_modules/
+.npm/
+.yarn/
+.pnp.cjs
+.pnp.loader.mjs
+
+# Expo local state
+.expo/
+.expo-shared/
+
+# Build output / caches
+dist/
+web-build/
+.cache/
+*.log
+
+# Android
+android/.gradle/
+android/.idea/
+android/local.properties
+android/build/
+android/app/build/
+
+# iOS
+ios/build/
+ios/Pods/
+ios/*.xcworkspace/
+*.xcuserdata/
+
+# Env & secrets
+.env
+.env.*
