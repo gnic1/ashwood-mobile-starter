@@ -1,0 +1,138 @@
+[
+  {
+    "id": "evt_1760151185727",
+    "type": "chat",
+    "payload": {
+      "prompt": "hello",
+      "output": "world"
+    },
+    "at": "2025-10-11T02:53:05.727Z"
+  },
+  {
+    "id": "evt_1760151238010",
+    "type": "image",
+    "payload": {
+      "prompt": "Cozy haunted house icon",
+      "size": "1024x1024",
+      "file": "/images/img_1760151238007.png",
+      "tags": [
+        "icon",
+        "test"
+      ]
+    },
+    "at": "2025-10-11T02:53:58.010Z"
+  },
+  {
+    "id": "evt_1760152222726",
+    "type": "chat",
+    "payload": {
+      "prompt": "hello",
+      "output": "world"
+    },
+    "at": "2025-10-11T03:10:22.726Z"
+  },
+  {
+    "id": "evt_1760152269200",
+    "type": "image",
+    "payload": {
+      "prompt": "Cozy haunted house icon",
+      "size": "1024x1024",
+      "file": "/images/img_1760152269197.png",
+      "tags": [
+        "icon",
+        "test"
+      ]
+    },
+    "at": "2025-10-11T03:11:09.200Z"
+  },
+  {
+    "id": "evt_1760152644783",
+    "type": "chat",
+    "payload": {
+      "prompt": "hello",
+      "output": "world"
+    },
+    "at": "2025-10-11T03:17:24.783Z"
+  },
+  {
+    "id": "evt_1760152686280",
+    "type": "image",
+    "payload": {
+      "prompt": "Cozy haunted house icon",
+      "size": "1024x1024",
+      "file": "/images/img_1760152686272.png",
+      "tags": [
+        "icon",
+        "test"
+      ]
+    },
+    "at": "2025-10-11T03:18:06.280Z"
+  },
+  {
+    "id": "evt_1760152877602",
+    "type": "chat",
+    "payload": {
+      "prompt": "Say: routes OK.",
+      "output": ""
+    },
+    "at": "2025-10-11T03:21:17.602Z"
+  },
+  {
+    "id": "evt_1760152881048",
+    "type": "vision",
+    "payload": {
+      "image_url": "https://upload.wikimedia.org/wikipedia/commons/3/3f/Fronalpstock_big.jpg",
+      "prompt": "Describe in one short sentence.",
+      "output": ""
+    },
+    "at": "2025-10-11T03:21:21.048Z"
+  },
+  {
+    "id": "evt_1760154512919",
+    "type": "chat",
+    "payload": {
+      "prompt": "Say: host can reach the proxy.",
+      "output": ""
+    },
+    "at": "2025-10-11T03:48:32.919Z"
+  },
+  {
+    "id": "evt_1760154720087",
+    "type": "chat",
+    "payload": {
+      "prompt": "Say hello from Ashwood.",
+      "output": ""
+    },
+    "at": "2025-10-11T03:52:00.087Z"
+  },
+  {
+    "id": "evt_1760154724555",
+    "type": "chat",
+    "payload": {
+      "prompt": "Say hello from Ashwood.",
+      "output": ""
+    },
+    "at": "2025-10-11T03:52:04.555Z"
+  },
+  {
+    "id": "evt_1760154728712",
+    "type": "vision",
+    "payload": {
+      "image_url": "https://upload.wikimedia.org/wikipedia/commons/3/3f/Fronalpstock_big.jpg",
+      "prompt": "Describe in one short sentence.",
+      "output": ""
+    },
+    "at": "2025-10-11T03:52:08.712Z"
+  },
+  {
+    "id": "evt_1760154757216",
+    "type": "image",
+    "payload": {
+      "prompt": "A minimal, cozy haunted house icon, vector style, centered",
+      "size": "1024x1024",
+      "file": "/images/img_1760154757213.png",
+      "tags": []
+    },
+    "at": "2025-10-11T03:52:37.216Z"
+  }
+]

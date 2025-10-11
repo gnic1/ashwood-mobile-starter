@@ -1,5 +1,4 @@
-﻿/* ASHWOOD PROXY v2 (static /routes) */
-import express from "express";
+﻿import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import OpenAI from "openai";
@@ -22,7 +21,7 @@ const MODEL_ALLOW = new Set(["gpt-4o-mini","gpt-4o","o4-mini"]);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
-// Data dirs
+// Data folders
 const DATA_DIR   = path.join(__dirname, "data");
 const IMAGES_DIR = path.join(__dirname, "images");
 const DB_EVENTS  = path.join(DATA_DIR, "events.json");
@@ -36,11 +35,13 @@ app.use(express.json({ limit: "6mb" }));
 app.use(morgan("dev"));
 app.use(rateLimit({ windowMs: 60_000, max: 40, standardHeaders: true, legacyHeaders: false }));
 app.use((req, res, next) => { req.setTimeout(90_000); res.setTimeout(90_000); next(); });
+
+// Serve saved images
 app.use("/images", express.static(IMAGES_DIR));
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// ---------- helpers ----------
+// ---- helpers ----
 const requireSecret = (req, res, next) => {
   if (!SHARED_SECRET) return next();
   const key = req.header("x-ashwood-key");
@@ -51,12 +52,11 @@ const clamp = (n, min, max) => Math.min(Math.max(n, min), max);
 const sanitizeTemp = (t) => Number.isFinite(t) ? clamp(t, 0, 2) : undefined;
 const sanitizeTopP = (p) => Number.isFinite(p) ? clamp(p, 0, 1) : undefined;
 const resolveModel = (m) => (m && MODEL_ALLOW.has(m)) ? m : MODEL_DEFAULT;
-
 const readJson = (file) => { try { return JSON.parse(fs.readFileSync(file, "utf8") || "[]"); } catch { return []; } };
 const writeJson = (file, data) => fs.writeFileSync(file, JSON.stringify(data, null, 2), "utf8");
 const appendJson = (file, row) => { const arr = readJson(file); arr.push(row); writeJson(file, arr); };
 
-// ---------- health ----------
+// ---- Health ----
 app.get("/health", (_req, res) => {
   res.json({ ok: true, service: "ashwood-openai-proxy", model_default: MODEL_DEFAULT, auth: !!SHARED_SECRET, port: PORT, mock: MOCK_MODE, max_output_tokens: MAX_OUTPUT_TOKENS });
 });
@@ -70,7 +70,7 @@ app.get("/health/openai", async (_req, res) => {
   }
 });
 
-// ---------- routes (STATIC list; no app._router) ----------
+// ---- Routes (static list; robust across Express versions) ----
 app.get("/routes", requireSecret, (_req, res) => {
   const routes = [
     { methods: "GET",  path: "/health" },
@@ -86,10 +86,10 @@ app.get("/routes", requireSecret, (_req, res) => {
     { methods: "POST", path: "/api/tag-image" },
     { methods: "GET",  path: "/images/:file" }
   ];
-  res.json({ port: PORT, mock: MOCK_MODE, routes, version: "v2-static" });
+  res.json({ port: PORT, mock: MOCK_MODE, routes });
 });
 
-// ---------- event log ----------
+// ---- Event log ----
 app.post("/api/event", requireSecret, (req, res) => {
   const type = String(req.body?.type || "").trim();
   const payload = req.body?.payload ?? {};
@@ -105,7 +105,7 @@ app.get("/api/events", requireSecret, (req, res) => {
   res.json({ ok: true, count: out.length, events: out.slice(-200) });
 });
 
-// ---------- chat (non-stream) ----------
+// ---- Chat (non-streaming) ----
 app.post("/api/chat", requireSecret, async (req, res) => {
   try {
     const prompt = (req.body?.prompt || "").toString().trim();
@@ -131,7 +131,7 @@ app.post("/api/chat", requireSecret, async (req, res) => {
   }
 });
 
-// ---------- chat (stream) ----------
+// ---- Chat (streaming) ----
 app.post("/api/chat/stream", requireSecret, async (req, res) => {
   try {
     const prompt = (req.body?.prompt || "").toString().trim();
@@ -165,7 +165,7 @@ app.post("/api/chat/stream", requireSecret, async (req, res) => {
   }
 });
 
-// ---------- vision ----------
+// ---- Vision ----
 app.post("/api/vision", requireSecret, async (req, res) => {
   try {
     const image_url = (req.body?.image_url || "").toString().trim();
@@ -200,7 +200,7 @@ app.post("/api/vision", requireSecret, async (req, res) => {
   }
 });
 
-// ---------- image gen (+save +tags) ----------
+// ---- Image gen (+ save to disk + tags) ----
 const normalizeSize = (size) => {
   const supported = new Set(["1024x1024","1024x1536","1536x1024","auto"]);
   return supported.has(String(size)) ? String(size) : "1024x1024";
@@ -232,7 +232,7 @@ app.post("/api/image", requireSecret, async (req, res) => {
   }
 });
 
-// ---------- images list + tagging ----------
+// ---- Images list + tagging ----
 app.get("/api/images", requireSecret, (_req, res) => {
   const imgs = readJson(DB_IMAGES);
   res.json({ ok: true, count: imgs.length, images: imgs.slice(-200) });

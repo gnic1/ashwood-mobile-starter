@@ -3,7 +3,7 @@ import { Platform, SafeAreaView, ScrollView, Text, TextInput, TouchableOpacity, 
 
 const API_BASE = Platform.OS === "android"
   ? "http://10.0.2.2:5051"
-  : "http://localhost:5051";
+  : "http://10.0.2.2:5051";
 
 // If you kept SHARED_SECRET in the app earlier, it was injected into headers already.
 // If not present, this still works because auth is disabled on the server right now.
@@ -192,6 +192,11 @@ export default function App() {
     </SafeAreaView>
   );
 }
+
+
+
+
+
 
 
 
