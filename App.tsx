@@ -1,13 +1,15 @@
 ﻿import React, { useCallback, useMemo, useState } from "react";
 import { Platform, SafeAreaView, ScrollView, Text, TextInput, TouchableOpacity, View, Image } from "react-native";
 
-const API_BASE = Platform.OS === "android" ? "http://10.0.2.2:5051" : "http://localhost:5051";
+const API_BASE = Platform.OS === "android"
+  ? "http://10.0.2.2:5051"
+  : "http://localhost:5051";
 
 // If you kept SHARED_SECRET in the app earlier, it was injected into headers already.
 // If not present, this still works because auth is disabled on the server right now.
 const commonHeaders: Record<string,string> = {
   "Content-Type": "application/json",
-  // "x-ashwood-key": "<injected-by-previous-step-if-present>"
+  "x-ashwood-key": "828c7f488e794c58ae2d8a9d"
 };
 
 type Status = "Idle" | "Running..." | "Streaming..." | "Done" | "Error";
@@ -190,3 +192,9 @@ export default function App() {
     </SafeAreaView>
   );
 }
+
+
+
+
+
+
