@@ -1,35 +1,36 @@
 ﻿{
-    "expo":  {
-                 "name":  "Ashwood and Co",
-                 "slug":  "ashwood-mobile",
-                 "version":  "0.1.0",
-                 "orientation":  "portrait",
-                 "icon":  "./assets/icon.png",
-                 "splash":  {
-                                "image":  "./assets/splash.png",
-                                "resizeMode":  "contain",
-                                "backgroundColor":  "#0b0b0d"
-                            },
-                 "assetBundlePatterns":  [
-                                             "**/*"
-                                         ],
-                 "ios":  {
-                             "supportsTablet":  true
-                         },
-                 "android":  {
-                                 "usesCleartextTraffic":  true,
-                                 "adaptiveIcon":  {
-                                                      "foregroundImage":  "./assets/adaptive-icon.png",
-                                                      "backgroundColor":  "#0b0b0d"
-                                                  },
-                                 "package":  "com.ashwoodco.ashwoodmobile"
-                             },
-                 "web":  {
-                             "bundler":  "metro",
-                             "favicon":  "./assets/favicon.png"
-                         },
-                 "plugins":  [
-                                 "expo-asset"
-                             ]
-             }
+  "expo": {
+    "name": "Ashwood & Co (GAME)",
+    "slug": "ashwood-game",
+    "scheme": "ashwood",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#000000"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ashwood.game"
+    },
+    "android": {
+      "package": "com.ashwood.game",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#000000"
+      }
+    },
+    "web": {
+      "bundler": "metro",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": ["expo-router", "expo-asset"],
+    "extra": {
+      "OPENAI_API_KEY": "${EXPO_PUBLIC_OPENAI_API_KEY}"
+    }
+  }
 }

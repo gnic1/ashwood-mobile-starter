@@ -134,5 +134,47 @@
       "tags": []
     },
     "at": "2025-10-11T03:52:37.216Z"
+  },
+  {
+    "id": "evt_1760220623269",
+    "type": "vision",
+    "payload": {
+      "image_url": "https://upload.wikimedia.org/wikipedia/commons/3/3f/Fronalpstock_big.jpg",
+      "prompt": "Describe in one short sentence.",
+      "output": ""
+    },
+    "at": "2025-10-11T22:10:23.269Z"
+  },
+  {
+    "id": "evt_1760220714680",
+    "type": "image",
+    "payload": {
+      "prompt": "A minimal, cozy haunted house icon, vector style, centered",
+      "size": "1024x1024",
+      "file": "/images/img_1760220714672.png",
+      "tags": []
+    },
+    "at": "2025-10-11T22:11:54.680Z"
+  },
+  {
+    "id": "evt_1760221413211",
+    "type": "image",
+    "payload": {
+      "prompt": "A minimal, cozy haunted house icon, vector style, centered",
+      "size": "1024x1024",
+      "file": "/images/img_1760221413209.png",
+      "tags": []
+    },
+    "at": "2025-10-11T22:23:33.212Z"
+  },
+  {
+    "id": "evt_1760221427238",
+    "type": "vision",
+    "payload": {
+      "image_url": "https://upload.wikimedia.org/wikipedia/commons/3/3f/Fronalpstock_big.jpg",
+      "prompt": "Describe in one short sentence.",
+      "output": ""
+    },
+    "at": "2025-10-11T22:23:47.238Z"
   }
 ]
