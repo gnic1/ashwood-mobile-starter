@@ -31,3 +31,5 @@ ios/*.xcworkspace/
 # Env & secrets
 .env
 .env.*
+# Server secrets
+server/.env

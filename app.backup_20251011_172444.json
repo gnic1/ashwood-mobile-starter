@@ -30,7 +30,7 @@
     },
     "plugins": ["expo-router", "expo-asset"],
     "extra": {
-      "OPENAI_BASE_URL": "${EXPO_PUBLIC_OPENAI_BASE_URL}"
+      "OPENAI_API_KEY": "${EXPO_PUBLIC_OPENAI_API_KEY}"
     }
   }
 }
