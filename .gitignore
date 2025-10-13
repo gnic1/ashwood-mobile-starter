@@ -72,3 +72,5 @@ backups/
 *.zip
 *.7z
 *.rar
+backups/
+*.zip
