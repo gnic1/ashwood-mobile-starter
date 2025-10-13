@@ -68,3 +68,7 @@ server/mock-*.cjs
 
 # local helper scripts
 Ashwood-StartDay.ps1
+backups/
+*.zip
+*.7z
+*.rar
