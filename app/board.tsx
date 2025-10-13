@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Stack, useRouter } from "expo-router";
 import { View, Text, Pressable, ScrollView } from "react-native";
 import { useGame } from "../src/state/gameState";
@@ -13,7 +13,7 @@ export default function Board() {
     (async () => {
       const s = await loadStory();
       const map: Record<string, Scene> = {};
-      s.scenes.forEach(sc => map[sc.id] = sc);
+      (s.scenes ?? []).forEach(sc => map[sc.id] = sc);
       setStory({ scenesById: map });
     })();
   }, []);

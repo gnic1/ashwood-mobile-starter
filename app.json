@@ -1,36 +1,45 @@
 ﻿{
-  "expo": {
-    "name": "Ashwood & Co (GAME)",
-    "slug": "ashwood-game",
-    "scheme": "ashwood",
-    "version": "1.0.0",
-    "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "userInterfaceStyle": "automatic",
-    "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#000000"
-    },
-    "assetBundlePatterns": ["**/*"],
-    "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.ashwood.game"
-    },
-    "android": {
-      "package": "com.ashwood.game",
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#000000"
-      }
-    },
-    "web": {
-      "bundler": "metro",
-      "favicon": "./assets/favicon.png"
-    },
-    "plugins": ["expo-router", "expo-asset"],
-    "extra": {
-      "OPENAI_BASE_URL": "${EXPO_PUBLIC_OPENAI_BASE_URL}"
-    }
-  }
+    "expo":  {
+                 "name":  "Ashwood \u0026 Co (GAME)",
+                 "slug":  "ashwood-game",
+                 "scheme":  "ashwood",
+                 "version":  "1.0.0",
+                 "orientation":  "portrait",
+                 "icon":  "./assets/icon.png",
+                 "userInterfaceStyle":  "automatic",
+                 "splash":  {
+                                "image":  "./assets/splash.png",
+                                "resizeMode":  "contain",
+                                "backgroundColor":  "#000000"
+                            },
+                 "assetBundlePatterns":  [
+                                             "**/*"
+                                         ],
+                 "ios":  {
+                             "supportsTablet":  true,
+                             "bundleIdentifier":  "com.ashwood.game"
+                         },
+                 "android":  {
+                                 "package":  "com.ashwood.game",
+                                 "adaptiveIcon":  {
+                                                      "foregroundImage":  "./assets/adaptive-icon.png",
+                                                      "backgroundColor":  "#000000"
+                                                  }
+                             },
+                 "web":  {
+                             "bundler":  "metro",
+                             "favicon":  "./assets/favicon.png"
+                         },
+                 "plugins":  [
+                                 "expo-router",
+                                 "expo-asset"
+                             ],
+                 "extra":  {
+                               "OPENAI_BASE_URL":  "${EXPO_PUBLIC_OPENAI_BASE_URL}"
+                           },
+                 "updates":  {
+                                 "checkAutomatically":  "NEVER",
+                                 "enabled":  false
+                             }
+             }
 }
