@@ -1,0 +1,63 @@
+﻿{
+  "id": "founding",
+  "title": "The Founding of Ashwood & Co.",
+  "startSceneId": "foyer",
+  "scenes": [
+    {
+      "id": "foyer",
+      "title": "Ashwood Manor - Foyer",
+      "mood": "candlelight",
+      "text": "A brass key sits in a dusted dish. Footsteps echo beyond the stair.",
+      "choices": [
+        { "label": "Take the key", "nextSceneId": "hall", "effects": [{ "type": "flag", "key": "hasKey", "value": true }] },
+        { "label": "Announce yourself", "nextSceneId": "hall", "effects": [{ "type": "score", "delta": 1 }] }
+      ]
+    },
+    {
+      "id": "hall",
+      "title": "Great Hall",
+      "mood": "storm",
+      "text": "Portraits watch with patient disapproval. A door to the gallery is unlatched.",
+      "choices": [
+        { "label": "Enter the gallery", "nextSceneId": "gallery", "effects": [] },
+        { "label": "Return to foyer", "nextSceneId": "foyer", "effects": [] }
+      ]
+    },
+    {
+      "id": "gallery",
+      "title": "Long Gallery",
+      "mood": "quiet",
+      "text": "Moonlight stripes the carpet. One portrait is freshly polished, its plaque pried loose.",
+      "choices": [
+        { "label": "Inspect the plaque", "nextSceneId": "study", "effects": [{ "type": "score", "delta": 1 }] },
+        { "label": "Back to the hall", "nextSceneId": "hall", "effects": [] }
+      ]
+    },
+    {
+      "id": "study",
+      "title": "Study",
+      "mood": "quiet",
+      "text": "A ledger lies open, an entry circled in red. The lamp flickers.",
+      "choices": [
+        { "label": "Read the entry", "nextSceneId": "ledger", "effects": [{ "type": "score", "delta": 1 }] },
+        { "label": "Leave it (but take the ledger)", "nextSceneId": "ledger", "effects": [] }
+      ]
+    },
+    {
+      "id": "ledger",
+      "title": "Ledger Note",
+      "mood": "reveal",
+      "text": "The entry mentions a sealed contract signed at midnight. A margin note: 'The beginning of Ashwood & Co.'",
+      "choices": [
+        { "label": "Close the ledger", "nextSceneId": "end", "effects": [] }
+      ]
+    },
+    {
+      "id": "end",
+      "title": "Prologue Ends",
+      "mood": "fade",
+      "text": "You feel the house acknowledge you. The mystery begins.",
+      "choices": []
+    }
+  ]
+}

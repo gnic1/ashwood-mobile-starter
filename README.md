@@ -45,3 +45,11 @@ This is a minimal Expo (React Native) starter aligned to our approved MVP specs 
 ## Notes
 - This starter intentionally keeps logic minimal so we can iterate quickly.
 - Screen names match the project binder to keep design/dev in sync.
+
+## Checkpoint: sprint-1-verified
+
+- App boots via Expo (Android emulator)
+- Story playable (=5 scenes): Foyer ? Hall ? Gallery ? Study ? End
+- 'Embellish with AI' uses proxy ? OpenAI (Responses API)
+- Dev checks: 'Test OpenAI (prompt)' and 'Test Chat (messages)' succeed via proxy
+- Secrets kept server-side (OPENAI_API_KEY only in server/.env)

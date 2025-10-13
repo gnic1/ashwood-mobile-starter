@@ -5,7 +5,7 @@ import type { RootStackParamList } from "../../App";
 import ButtonPrimary from "../components/ButtonPrimary";
 import CandleBackground from "../components/CandleBackground";
 import Header from "../components/Header";
-import { createSession, joinSession } from "../services/gameSession";
+import { createSession, joinSession } from "../../src/services/gameSession";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Join">;
 
@@ -80,3 +80,4 @@ const styles = StyleSheet.create({
   },
   row: { flexDirection: "row", marginTop: 12 },
 });
+

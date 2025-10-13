@@ -16,7 +16,7 @@ if (!OPENAI_API_KEY) {
 // Security hardening
 app.use(helmet({ crossOriginResourcePolicy: false }));
 
-// CORS: allow null (native app), localhost dev ports, and explicit list
+// CORS: allow null (native app) + local dev ports
 const whitelist = new Set([
   "http://localhost:8081",
   "http://localhost:8082",
@@ -25,18 +25,15 @@ const whitelist = new Set([
 ]);
 app.use(cors({
   origin: (origin, cb) => {
-    // Expo native fetch often has no origin (null) — allow it
-    if (!origin || whitelist.has(origin)) return cb(null, true);
+    if (!origin || whitelist.has(origin)) return cb(null, true); // native fetch often null
     return cb(new Error("CORS: origin not allowed"));
   },
   methods: ["POST", "GET", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"]
 }));
 
-// Parse JSON and limit size
 app.use(express.json({ limit: "256kb" }));
 
-// Simple rate limit
 const limiter = rateLimit({
   windowMs: 60_000,
   max: 60,
@@ -45,7 +42,7 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// Allow-list models (adjust as needed)
+// Permit only known models
 const MODEL_ALLOWLIST = new Set([
   "gpt-4.1-mini",
   "gpt-4.1",
@@ -67,10 +64,14 @@ async function callOpenAI(body) {
     body: JSON.stringify(body)
   });
   const text = await upstream.text();
-  return { status: upstream.status, type: upstream.headers.get("content-type") || "application/json", text };
+  return {
+    status: upstream.status,
+    type: upstream.headers.get("content-type") || "application/json",
+    text
+  };
 }
 
-// Basic text prompt (already working)
+// Existing simple prompt endpoint
 app.post("/api/openai/responses", async (req, res) => {
   try {
     const { model, input, ...rest } = req.body || {};
@@ -88,7 +89,7 @@ app.post("/api/openai/responses", async (req, res) => {
   }
 });
 
-// New: Chat-style endpoint that forwards messages[] directly
+// New chat-style endpoint (messages[])
 app.post("/api/openai/chat", async (req, res) => {
   try {
     const { model, messages, ...rest } = req.body || {};
@@ -98,7 +99,6 @@ app.post("/api/openai/chat", async (req, res) => {
     if (!MODEL_ALLOWLIST.has(model)) {
       return res.status(400).json({ error: `Model '${model}' not allowed.` });
     }
-    // Responses API can take 'input' as messages array
     const { status, type, text } = await callOpenAI({ model, input: messages, ...rest });
     res.status(status).type(type).send(text);
   } catch (err) {
@@ -109,4 +109,18 @@ app.post("/api/openai/chat", async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Ashwood proxy listening on http://localhost:${PORT}`);
+});
+/** --- Sprint 2+ sessions stub (in-memory) --- */
+const SESSIONS = new Map();
+app.post("/api/sessions", (req, res) => {
+  const id = Math.random().toString(36).slice(2, 8);
+  const now = Date.now();
+  const session = { id, createdAt: now, updatedAt: now, state: {} };
+  SESSIONS.set(id, session);
+  res.json({ id });
+});
+app.get("/api/sessions/:id", (req, res) => {
+  const s = SESSIONS.get(req.params.id);
+  if (!s) return res.status(404).json({ error: "not found" });
+  res.json(s);
 });

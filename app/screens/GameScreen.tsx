@@ -5,7 +5,7 @@ import type { RootStackParamList } from "../../App";
 import CandleBackground from "../components/CandleBackground";
 import Header from "../components/Header";
 import ButtonPrimary from "../components/ButtonPrimary";
-import { getNarration } from "../services/aiNarrator";
+import { getNarration } from "../../src/services/aiNarrator";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Game">;
 
@@ -64,3 +64,4 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
 });
+
