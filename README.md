@@ -53,3 +53,15 @@ This is a minimal Expo (React Native) starter aligned to our approved MVP specs 
 - 'Embellish with AI' uses proxy ? OpenAI (Responses API)
 - Dev checks: 'Test OpenAI (prompt)' and 'Test Chat (messages)' succeed via proxy
 - Secrets kept server-side (OPENAI_API_KEY only in server/.env)
+## Daily Start (Windows / PowerShell)
+
+### Window 1 – Proxy Server
+cd "$HOME\Desktop\ashwood-mobile-starter\server"
+$env:OPENAI_API_KEY = (Get-Content .env | ForEach-Object { ($_ -split '=',2)[1] })
+$env:PORT = "8787"
+node server.cjs
+
+### Window 2 – Expo App
+cd "$HOME\Desktop\ashwood-mobile-starter"
+$env:EXPO_PUBLIC_API_BASE = "http://10.0.2.2:8787"   # Android emulator
+npx expo start -c
