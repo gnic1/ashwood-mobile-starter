@@ -51,7 +51,7 @@ Add-Health "proxy-5051" "http://localhost:5051/health"
 Write-Host "Wrote snapshot: $log" -ForegroundColor Green
 Pause
 
-# ============= 2) Git status -> optional commit/push ============
+# ============= 2) Git status -> optional commit/push + tagging ============
 Title "Git status / commit / push"
 Set-Location $root
 git status
@@ -71,6 +71,34 @@ if ($msg -eq "skip") {
   }
   Write-Host "Pushing to origin/main..."
   git push origin main
+}
+
+# ---- Optional: create a daily tag and push it ----
+$doTag = Read-Host "Create git tag for today? (Y/n)"
+if ([string]::IsNullOrWhiteSpace($doTag) -or $doTag -match '^[Yy]$') {
+  $tagBase = "v-" + (Get-Date -Format "yyyyMMdd")
+  $tag = $tagBase
+
+  # If today's tag exists, fall back to a unique timestamp
+  $existing = (git tag -l $tag) -join ""
+  if (-not [string]::IsNullOrWhiteSpace($existing)) {
+    $tag = "v-" + (Get-Date -Format "yyyyMMdd-HHmmss")
+  }
+
+  try {
+    git tag $tag
+    if ($LASTEXITCODE -ne 0) {
+      Write-Warning "Could not create tag '$tag' (maybe it already exists?)."
+    } else {
+      Write-Host "Created tag: $tag" -ForegroundColor Green
+      Write-Host "Pushing tag to origin..."
+      git push origin $tag
+    }
+  } catch {
+    Write-Warning ("Tagging failed: {0}" -f $_.Exception.Message)
+  }
+} else {
+  Write-Host "Skipping tag."
 }
 Pause
 
