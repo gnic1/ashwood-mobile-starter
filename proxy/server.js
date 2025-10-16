@@ -1,134 +1,147 @@
-﻿const express = require("express");
-const cors = require("cors");
-const http = require("http");
-require("dotenv").config(); // loads proxy/.env if present
+﻿/* eslint-disable */
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const bodyParser = require('body-parser');
+
+// Safe fetch: Node 18+ has global.fetch; otherwise lazy-load node-fetch
+const fetch = (typeof global.fetch === 'function')
+  ? global.fetch
+  : (...args) => import('node-fetch').then(({ default: f }) => f(...args));
+
+console.log('=== ASHWOOD PROXY v2 — starting with session routes & OpenAI passthrough ===');
 
 const app = express();
+app.use(cors());
+app.use(bodyParser.json());
 
-// Ports (keep both so the app code using 5051 continues to work)
-const PORT_MAIN = parseInt(process.env.PORT, 10) || 8787;
-const PORT_ALT  = parseInt(process.env.ALT_PORT, 10) || 5051;
+const PORT_PRIMARY = process.env.PORT || 8787;
+const PORT_SECONDARY = 5051;
 
-// OpenAI configuration
-const OPENAI_BASE = process.env.OPENAI_BASE || "https://api.openai.com/v1";
+// -------- Health & Version --------
+app.get('/', (_req, res) => {
+  res.json({ ok: true, message: 'Ashwood proxy listening', ports: [PORT_PRIMARY, PORT_SECONDARY] });
+});
+app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+app.get('/_version', (_req, res) => {
+  res.json({ ok: true, version: 'proxy-v2', pid: process.pid, node: process.version, ts: new Date().toISOString() });
+});
+
+// -------- Session (Join Flow) --------
+const SESSIONS = {
+  "ASH-72QK": {
+    code: "ASH-72QK",
+    title: "The Founding of Ashwood & Co.",
+    description:
+      "Victorian England, 1888. You are summoned to Ashwood Hall for the reading of Ambrose Ashwood’s will. The storm is not the only thing that’s gathering...",
+    gmName: "Ambrose_Ashwood",
+    isEnhanced: true,
+    background: "victorian-manor",
+    logo: "🕯️",
+    startsAt: null
+  },
+  "HALL-1901": {
+    code: "HALL-1901",
+    title: "Ashwood Hall: The House Breathes",
+    description:
+      "Candles flare to life as the doors creak open. Portrait eyes follow. Something in the cellar doesn’t want to stay sealed.",
+    gmName: "GM_Crow",
+    isEnhanced: false,
+    background: "stormy-hall",
+    logo: "🏰",
+    startsAt: null
+  }
+};
+
+// Validate by code
+app.post('/session/validate', (req, res) => {
+  const { code } = req.body || {};
+  if (!code || typeof code !== 'string') {
+    return res.status(400).json({ ok: false, error: 'Missing or invalid `code`.' });
+  }
+  const key = code.trim().toUpperCase();
+  const session = SESSIONS[key];
+  if (!session) return res.status(404).json({ ok: false, error: 'Session not found.' });
+  const { title, gmName, isEnhanced, background, logo, description, startsAt } = session;
+  return res.json({
+    ok: true,
+    session: { code: key, title, gmName, isEnhanced, background, logo, description, startsAt }
+  });
+});
+
+// Fetch landing by code
+app.get('/session/:code', (req, res) => {
+  const key = String(req.params.code || '').trim().toUpperCase();
+  const session = SESSIONS[key];
+  if (!session) return res.status(404).json({ ok: false, error: 'Session not found.' });
+  return res.json({ ok: true, session });
+});
+
+// -------- Character list for a session (mock) --------
+const CHARACTERS = [
+  { id: "c1", name: "Evelyn Blackwood", role: "Historian", blurb: "Keeper of Ashwood’s forgotten records." },
+  { id: "c2", name: "Inspector Marlowe", role: "Detective", blurb: "A skeptic drawn by unsolved curiosities." },
+  { id: "c3", name: "Sister Agnes", role: "Nun", blurb: "Whispers warn her: the house remembers." },
+  { id: "c4", name: "Thomas Whitaker", role: "Barrister", blurb: "Executor of Ambrose’s last will." }
+];
+
+app.get('/session/:code/characters', (req, res) => {
+  const key = String(req.params.code || '').trim().toUpperCase();
+  if (!SESSIONS[key]) return res.status(404).json({ ok: false, error: 'Session not found.' });
+  // later: attach availability/claimed-by state
+  res.json({ ok: true, code: key, characters: CHARACTERS });
+});
+
+// -------- OpenAI passthrough --------
+const OPENAI_BASE = process.env.OPENAI_BASE || 'https://api.openai.com';
 const OPENAI_KEY  = process.env.OPENAI_API_KEY;
 
-// --- middleware ---
-app.use(cors());
-app.use(express.json({ limit: "10mb" }));
-
-// request logger
-app.use((req, _res, next) => {
-  console.log(new Date().toISOString(), req.method, req.originalUrl);
-  next();
-});
-
-// --- health ---
-app.get("/health", (_req, res) => {
-  res.json({
-    ok: true,
-    service: "ashwood-proxy",
-    ports: [PORT_MAIN, PORT_ALT],
-    openaiBase: OPENAI_BASE,
-    hasKey: !!OPENAI_KEY,
-    ts: new Date().toISOString()
-  });
-});
-
-// --- helpers ---
-async function openaiFetch(path, body) {
+function requireKey(res) {
   if (!OPENAI_KEY) {
-    return {
-      ok: false,
-      status: 500,
-      json: async () => ({ error: "OPENAI_API_KEY is not set on the proxy server" })
-    };
+    res.status(500).json({ ok: false, error: 'OPENAI_API_KEY missing on proxy server' });
+    return false;
   }
-  const url = OPENAI_BASE.replace(/\/+$/,"") + path;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Authorization": "Bearer " + OPENAI_KEY,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(body || {})
-  });
-  return res;
+  return true;
 }
 
-// --- /api/chat -> OpenAI Chat Completions ---
-app.post("/api/chat", async (req, res) => {
+app.post('/v1/chat/completions', async (req, res) => {
+  if (!requireKey(res)) return;
   try {
-    const model = req.body?.model || "gpt-4o-mini";
-    const messages = req.body?.messages || [{ role: "user", content: "Hello from Ashwood proxy!" }];
-    const r = await openaiFetch("/chat/completions", { model, messages });
-    const data = await r.json();
-    res.status(r.ok ? 200 : 502).json(data);
+    const r = await fetch(`${OPENAI_BASE}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENAI_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(req.body || {})
+    });
+    const text = await r.text();
+    res.status(r.status).type('application/json').send(text);
   } catch (e) {
-    res.status(500).json({ error: String(e) });
+    res.status(500).json({ ok: false, error: String(e) });
   }
 });
 
-// --- /api/image -> OpenAI Image generation ---
-app.post("/api/image", async (req, res) => {
+app.get('/v1/models', async (_req, res) => {
+  if (!requireKey(res)) return;
   try {
-    const prompt = req.body?.prompt || "A friendly raven holding an antique key in front of a spooky mansion";
-    const size = req.body?.size || "1024x1024";
-    const r = await openaiFetch("/images/generations", { prompt, size });
-    const data = await r.json();
-    res.status(r.ok ? 200 : 502).json(data);
+    const r = await fetch(`${OPENAI_BASE}/v1/models`, {
+      headers: { 'Authorization': `Bearer ${OPENAI_KEY}` }
+    });
+    const text = await r.text();
+    res.status(r.status).type('application/json').send(text);
   } catch (e) {
-    res.status(500).json({ error: String(e) });
+    res.status(500).json({ ok: false, error: String(e) });
   }
 });
 
-// --- /api/vision -> Chat with an image URL (simple vision example) ---
-app.post("/api/vision", async (req, res) => {
-  try {
-    const model = req.body?.model || "gpt-4o-mini";
-    const imageUrl = req.body?.image_url || req.body?.imageUrl || "";
-    const prompt = req.body?.prompt || "Describe this image.";
-    const messages = [
-      {
-        role: "user",
-        content: [
-          { type: "text", text: prompt },
-          imageUrl ? { type: "image_url", image_url: { url: imageUrl } } : { type: "text", text: "(no image_url provided)" }
-        ]
-      }
-    ];
-    const r = await openaiFetch("/chat/completions", { model, messages });
-    const data = await r.json();
-    res.status(r.ok ? 200 : 502).json(data);
-  } catch (e) {
-    res.status(500).json({ error: String(e) });
-  }
-});
+// -------- 404 after all routes --------
+app.use((_req, res) => res.status(404).json({ ok: false, error: 'Not found' }));
 
-// --- echo for quick debugging ---
-app.post("/echo", (req, res) => {
-  res.json({ ok: true, received: req.body || null });
-});
-
-// --- CORS preflight for any route ---
-app.options("*", cors());
-
-// --- catch-all: never 404 during development ---
-app.all("*", (req, res) => {
-  res.json({
-    ok: true,
-    note: "catch-all stub",
-    path: req.originalUrl,
-    method: req.method,
-    body: req.body || null,
-    ts: new Date().toISOString()
-  });
-});
-
-// --- launch on BOTH ports ---
-http.createServer(app).listen(PORT_MAIN, () => {
-  console.log("Ashwood proxy listening on http://localhost:" + PORT_MAIN);
-});
-http.createServer(app).listen(PORT_ALT, () => {
-  console.log("Ashwood proxy also listening on http://localhost:" + PORT_ALT);
-});
+// -------- Start servers --------
+app.listen(PORT_PRIMARY, () =>
+  console.log(`Ashwood proxy listening on http://localhost:${PORT_PRIMARY}`)
+);
+app.listen(PORT_SECONDARY, () =>
+  console.log(`Ashwood proxy also listening on http://localhost:${PORT_SECONDARY}`)
+);
