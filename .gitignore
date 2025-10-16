@@ -34,3 +34,4 @@ ios/*.xcworkspace/
 
 .env
 .env.*.backup*
+# .env + backups
