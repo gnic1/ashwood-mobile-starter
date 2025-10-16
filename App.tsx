@@ -1,4 +1,4 @@
-import "react-native-gesture-handler";
+﻿import "react-native-gesture-handler";
 import React from "react";
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator, type NativeStackNavigationOptions } from "@react-navigation/native-stack";
@@ -7,7 +7,6 @@ import { StatusBar } from "expo-status-bar";
 import JoinScreen from "./src/screens/JoinScreen";
 import GMLandingScreen from "./src/screens/GMLandingScreen";
 import CharacterSelectScreen from "./src/screens/CharacterSelectScreen";
-import HoldingRoomScreen from "./src/screens/HoldingRoomScreen";
 
 export type RootStackParamList = {
   Join: undefined;
@@ -32,7 +31,6 @@ export default function App() {
         <Stack.Screen name="Join" component={JoinScreen} options={{ title: "Ashwood & Co." }} />
         <Stack.Screen name="GMLanding" component={GMLandingScreen} options={{ title: "Game Landing" }} />
         <Stack.Screen name="CharacterSelect" component={CharacterSelectScreen} options={{ title: "Character Select" }} />
-        <Stack.Screen name="HoldingRoom" component={HoldingRoomScreen} options={{ title: "Ashwood Hall" }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

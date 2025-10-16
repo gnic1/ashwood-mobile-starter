@@ -10,10 +10,6 @@ export type SessionLite = {
   logo: string;
   startsAt: string | null;
   settings?: { rokuMaxPlayers?: number };
-  gmType?: "human" | "ai";
-  state?: "selection_open" | "selection_locked" | "in_game";
-  selectionSeconds?: number;
-  selectionEndsAt?: number | null;
 };
 
 export type Character = {
@@ -22,7 +18,7 @@ export type Character = {
   role: string;
   blurb: string;
   buffs: string[];
-  debuffsHidden?: boolean;
+  debuffsHidden?: boolean; // debuffs are hidden on this screen
   available: boolean;
   claimedBy: string | null;
 };
@@ -67,42 +63,15 @@ export async function claimCharacter(code: string, characterId: string, playerNa
   return data.characters as Character[];
 }
 
-export type SessionStatus = {
-  code: string;
-  state: "selection_open" | "selection_locked" | "in_game";
-  selectionEndsAt: number | null;
-  players: { name: string; type: "human" | "ai"; strikes: number; characterId: string | null }[];
-  claims: Record<string, string>;
-};
-
-export async function getSessionStatus(code: string): Promise<SessionStatus> {
+// Roku-friendly: update number of Roku players for a session
+export async function setRokuMaxPlayers(code: string, count: number): Promise<number> {
   const trimmed = (code || "").trim().toUpperCase();
-  const res = await fetch(`${BASE}/session/${encodeURIComponent(trimmed)}/status`);
-  const data = await res.json();
-  if (!res.ok || !data?.ok) throw new Error(data?.error || `Status fetch failed (${res.status})`);
-  return data as SessionStatus;
-}
-
-export async function setConfig(code: string, opts: { gmType?: "human"|"ai"; selectionSeconds?: number; inactivitySeconds?: number; aiPlayers?: string[] }) {
-  const trimmed = (code || "").trim().toUpperCase();
-  const res = await fetch(`${BASE}/session/${encodeURIComponent(trimmed)}/config`, {
+  const res = await fetch(`${BASE}/session/${encodeURIComponent(trimmed)}/settings`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(opts || {}),
+    body: JSON.stringify({ rokuMaxPlayers: count }),
   });
   const data = await res.json();
-  if (!res.ok || !data?.ok) throw new Error(data?.error || `Config failed (${res.status})`);
-  return data.config;
-}
-
-export async function humanForceStart(code: string, bootIfUnclaimed: boolean) {
-  const trimmed = (code || "").trim().toUpperCase();
-  const res = await fetch(`${BASE}/session/${encodeURIComponent(trimmed)}/start`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ bootIfUnclaimed }),
-  });
-  const data = await res.json();
-  if (!res.ok || !data?.ok) throw new Error(data?.error || `Start failed (${res.status})`);
-  return data;
+  if (!res.ok || !data?.ok) throw new Error(data?.error || `Settings update failed (${res.status})`);
+  return data.settings?.rokuMaxPlayers ?? 0;
 }

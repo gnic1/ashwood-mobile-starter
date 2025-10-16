@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+ï»¿import React, { useEffect, useMemo, useState } from "react";
 import { View, Text, FlatList, Alert } from "react-native";
 import { fetchCharacters, claimCharacter, type Character } from "../lib/api";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
@@ -12,7 +12,7 @@ type RootStackParamList = {
 
 type Props = NativeStackScreenProps<RootStackParamList, "CharacterSelect">;
 
-export default function CharacterSelectScreen({ route, navigation }: Props) {
+export default function CharacterSelectScreen({ route }: Props) {
   const code = route.params?.code;
   const [loading, setLoading] = useState(true);
   const [claimingId, setClaimingId] = useState<string | null>(null);
@@ -85,7 +85,7 @@ export default function CharacterSelectScreen({ route, navigation }: Props) {
   if (loading) {
     return (
       <View style={{ flex: 1, backgroundColor: "#0D0D0F", alignItems: "center", justifyContent: "center" }}>
-        <Text style={{ color: "#EDE9E3", marginTop: 12 }}>Fetching characters…</Text>
+        <Text style={{ color: "#EDE9E3", marginTop: 12 }}>Fetching charactersâ€¦</Text>
       </View>
     );
   }
@@ -125,7 +125,7 @@ export default function CharacterSelectScreen({ route, navigation }: Props) {
 
               <Text style={{ color: "#EDE9E3", fontSize: 18, fontWeight: "600" }}>{item.name}</Text>
               <Text style={{ color: "#876B34", marginTop: 2 }}>
-                {item.role}{iOwnThis ? " • (You)" : ""}
+                {item.role}{iOwnThis ? " â€¢ (You)" : ""}
               </Text>
               <Text style={{ color: "#B8B3AD", marginTop: 8, lineHeight: 20 }}>{item.blurb}</Text>
 
@@ -134,7 +134,7 @@ export default function CharacterSelectScreen({ route, navigation }: Props) {
                 <View style={{ marginTop: 10 }}>
                   <Text style={{ color: "#6F6B66", marginBottom: 6 }}>Attributes (Buffs)</Text>
                   {item.buffs.map((b, idx) => (
-                    <Text key={idx} style={{ color: "#EDE9E3", marginBottom: 2 }}>• {b}</Text>
+                    <Text key={idx} style={{ color: "#EDE9E3", marginBottom: 2 }}>â€¢ {b}</Text>
                   ))}
                 </View>
               ) : null}
