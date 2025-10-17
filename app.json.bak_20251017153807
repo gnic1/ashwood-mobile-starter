@@ -1,0 +1,7 @@
+{
+  "expo": {
+    "name": "ashwood-mobile",
+    "slug": "ashwood-mobile",
+    "entryPoint": "./index.js"
+  }
+}
