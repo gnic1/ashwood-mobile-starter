@@ -1,0 +1,53 @@
+﻿// If you later add real claims to the session, put them on sess.claims = { [charId]: { name } }
+  const claims = (sess.claims && typeof sess.claims === 'object') ? sess.claims : {};
+
+  const characters = (CHARACTERS_BASE || []).map(c => {
+    const owner = claims[c.id]?.name || null;
+    return {
+      ...c,
+      claimedBy: owner,                           // raw owner name or null
+      claimedByDisplay: owner || 'Available',     // always safe for UI
+      isClaimed: Boolean(owner)
+    };
+  });
+
+  res.json({ ok: true, characters });
+});res.json({ ok: true, characters: CHARACTERS_BASE });
+});
+//
+// --- Character roster (minimal for legacy screen) ---
+const CHARACTERS_BASE = [
+  { id: "c1", name: "Evelyn Blackwood", role: "Historian", blurb: "Keeper of Ashwood's forgotten records.", buffs: [], debuffs: [] },
+  { id: "c2", name: "Inspector Marlowe", role: "Detective", blurb: "A skeptic drawn by unsolved curiosities.", buffs: [], debuffs: [] },
+  { id: "c3", name: "Sister Agnes", role: "Nun", blurb: "Whispers warn her: the house remembers.", buffs: [], debuffs: [] },
+  { id: "c4", name: "Thomas Whitaker", role: "Barrister", blurb: "Executor of Ambrose's last will.", buffs: [], debuffs: [] }
+];
+//
+// Legacy characters endpoint for Character Select screen (with safe display fields)
+app.get('/session/:code/characters', (req, res) => {
+  const code = String(req.params.code || '').toUpperCase();
+  const sess = SESSIONS[code];
+  if (!sess) {
+    return res.status(404).json({ ok: false, error: 'Unknown session' });
+  }
+
+  const claims = (sess.claims && typeof sess.claims === 'object') ? sess.claims : {};
+
+  const characters = (CHARACTERS_BASE || []).map(c => {
+    const owner = claims[c.id] && claims[c.id].name ? claims[c.id].name : null;
+    return {
+      id: c.id,
+      name: c.name,
+      role: c.role,
+      blurb: c.blurb,
+      buffs: c.buffs || [],
+      debuffs: c.debuffs || [],
+      claimedBy: owner,                       // raw owner name or null
+      claimedByDisplay: owner || 'Available', // always safe for UI
+      isClaimed: !!owner
+    };
+  });
+
+  res.json({ ok: true, characters });
+});
+

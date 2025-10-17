@@ -1,0 +1,260 @@
+﻿require("dotenv").config();
+const express = require("express");
+const cors = require("cors");
+const bodyParser = require("body-parser");
+
+const app = express();
+app.use(cors());
+app.use(bodyParser.json());
+
+// no-cache (avoid 304s / stale shapes)
+app.set("etag", false);
+app.use((req, res, next) => {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.set("Pragma", "no-cache");
+  res.set("Expires", "0");
+  res.set("Surrogate-Control", "no-store");
+  next();
+});
+
+// simple request logger
+app.use((req, res, next) => {
+  const t0 = Date.now();
+  res.on("finish", () => {
+    const ms = Date.now() - t0;
+    const ct = res.getHeader("content-type") || "";
+    console.log("[proxy]", req.method, req.url, "->", res.statusCode, ct, ms + "ms");
+  });
+  next();
+});
+
+const PORT_PRIMARY = process.env.PORT || 8787;
+const PORT_SECONDARY = 5051;
+
+// ---- in-memory state ----
+const SESSIONS = {
+  "ASH-72QK": {
+    code: "ASH-72QK",
+    title: "The Founding of Ashwood & Co.",
+    description:
+      "Victorian England, 1888. You are summoned to Ashwood Hall for the reading of Ambrose Ashwood's will. The storm is not the only thing that's gathering...",
+    gmName: "Ambrose_Ashwood",
+    isEnhanced: true,
+    background: "victorian-manor",
+    logo: "🕯️",
+    startsAt: null,
+    claims: {} // { [charId]: { name } }
+  }
+};
+
+const CHARACTERS_BASE = [
+  { id: "c1", name: "Evelyn Blackwood", role: "Historian", blurb: "Keeper of Ashwood's forgotten records.", buffs: [], debuffs: [] },
+  { id: "c2", name: "Inspector Marlowe", role: "Detective", blurb: "A skeptic drawn by unsolved curiosities.", buffs: [], debuffs: [] },
+  { id: "c3", name: "Sister Agnes", role: "Nun", blurb: "Whispers warn her: the house remembers.", buffs: [], debuffs: [] },
+  { id: "c4", name: "Thomas Whitaker", role: "Barrister", blurb: "Executor of Ambrose's last will.", buffs: [], debuffs: [] }
+];
+
+/* ===== Legacy endpoints expected by the app ===== */
+
+// Always clear claims on validate so first-open is clean
+app.post("/session/validate", (req, res) => {
+  const code = String((req.body && req.body.code) || "").toUpperCase();
+  const sess = SESSIONS[code];
+  if (!sess) return res.status(404).json({ ok:false, error:"Unknown session code" });
+  sess.claims = {};
+  res.json({
+    ok: true,
+    session: {
+      code: sess.code, title: sess.title, gmName: sess.gmName, isEnhanced: sess.isEnhanced,
+      background: sess.background, logo: sess.logo, description: sess.description, startsAt: sess.startsAt
+    }
+  });
+});
+
+// Basic session info
+app.get("/session/:code", (req, res) => {
+  const code = String(req.params.code || "").toUpperCase();
+  const sess = SESSIONS[code];
+  if (!sess) return res.status(404).json({ ok:false, error:"Unknown session" });
+  res.json({ ok:true, session: {
+    code: sess.code, title: sess.title, description: sess.description,
+    gmName: sess.gmName, isEnhanced: sess.isEnhanced, background: sess.background,
+    logo: sess.logo, startsAt: sess.startsAt
+  }});
+});
+
+// Characters — OBJECT with { ok, characters:[...] } that the app expects
+app.get("/session/:code/characters", (req, res) => {
+  const code = String(req.params.code || "").toUpperCase();
+  const sess = SESSIONS[code];
+  if (!sess) return res.status(404).json({ ok:false, error:"Unknown session" });
+
+  const claims = (sess.claims && typeof sess.claims === "object") ? sess.claims : {};
+  const characters = CHARACTERS_BASE.map(c => {
+    const owner = claims[c.id] && claims[c.id].name ? String(claims[c.id].name) : null;
+    // Unclaimed => omit claimedBy; Claimed => include string claimedBy
+    return owner ? {
+      id: c.id, name: c.name, role: c.role, blurb: c.blurb,
+      buffs: c.buffs || [], debuffs: c.debuffs || [], claimedBy: owner
+    } : {
+      id: c.id, name: c.name, role: c.role, blurb: c.blurb,
+      buffs: c.buffs || [], debuffs: c.debuffs || []
+    };
+  });
+
+  res.status(200).json({ ok: true, characters });
+});
+
+// Claim (both forms)
+function claimCharacter(sess, charId, name) {
+  const id = String(charId || "").trim();
+  if (!id) return { ok:false, status:400, error:"Missing characterId" };
+  const exists = CHARACTERS_BASE.some(c => c.id === id);
+  if (!exists) return { ok:false, status:404, error:"Unknown character" };
+  if (!sess.claims || typeof sess.claims !== "object") sess.claims = {};
+  if (sess.claims[id] && sess.claims[id].name) return { ok:false, status:409, error:"Character already claimed" };
+  sess.claims[id] = { name: String(name || "Player") };
+  return { ok:true };
+}
+
+app.post("/session/:code/claim", (req, res) => {
+  const code = String(req.params.code || "").toUpperCase();
+  const sess = SESSIONS[code];
+  if (!sess) return res.status(404).json({ ok:false, error:"Unknown session" });
+  const r = claimCharacter(sess, (req.body && (req.body.characterId || req.body.id)), (req.body && req.body.name));
+  if (!r.ok) return res.status(r.status).json({ ok:false, error:r.error });
+  res.json({ ok:true });
+});
+
+app.post("/session/:code/characters/:id/claim", (req, res) => {
+  const code = String(req.params.code || "").toUpperCase();
+  const sess = SESSIONS[code];
+  if (!sess) return res.status(404).json({ ok:false, error:"Unknown session" });
+  const r = claimCharacter(sess, req.params.id, (req.body && req.body.name));
+  if (!r.ok) return res.status(r.status).json({ ok:false, error:r.error });
+  res.json({ ok:true });
+});
+
+/* ===== Lobby engine (/v1) — single mount ===== */
+const { register: registerLobby } = require("./lobby");
+registerLobby(app, "/v1");
+
+/* ===== 404 JSON ===== */
+app.use((req, res) => res.status(404).json({ ok:false, error:"Not found" }));
+
+/* ===== Listeners ===== */
+app.listen(PORT_PRIMARY, () => {
+  console.log("[Ashwood] Lobby endpoints mounted at /v1");
+  console.log(`Ashwood proxy listening on http://localhost:${PORT_PRIMARY}`);
+});
+app.listen(PORT_SECONDARY, () => {
+  console.log(`Ashwood proxy also listening on http://localhost:${PORT_SECONDARY}`);
+});
+/* ===== GM/Dev helpers ===== */
+
+/** Return current claim map (debug) */
+app.get("/session/:code/claims", (req, res) => {
+  const code = String(req.params.code || "").toUpperCase();
+  const sess = SESSIONS[code];
+  if (!sess) return res.status(404).json({ ok:false, error:"Unknown session" });
+  res.json({ ok:true, claims: sess.claims || {} });
+});
+
+/** Clear claims only (soft reset for Character Select) */
+app.post("/session/:code/claims/reset", (req, res) => {
+  const code = String(req.params.code || "").toUpperCase();
+  const sess = SESSIONS[code];
+  if (!sess) return res.status(404).json({ ok:false, error:"Unknown session" });
+  sess.claims = {};
+  res.json({ ok:true });
+});
+
+/** Hard reset: clear legacy claims AND ask lobby (/v1) to close a session if provided */
+app.post("/session/:code/reset-hard", async (req, res) => {
+  try {
+    const code = String(req.params.code || "").toUpperCase();
+    const sess = SESSIONS[code];
+    if (!sess) return res.status(404).json({ ok:false, error:"Unknown session" });
+
+    // 1) clear legacy character selections
+    sess.claims = {};
+
+    // 2) if a lobby session id is specified, try closing it to drop AI/timer state
+    const lobbyId = (req.body && (req.body.sessionId || req.body.session)) || null;
+    if (lobbyId) {
+      try {
+        const r = await fetch(`http://localhost:${PORT_PRIMARY}/v1/session/${encodeURIComponent(lobbyId)}/close`, { method: "POST" });
+        // ignore status; best effort
+        await r.text().catch(()=>{});
+      } catch (e) {
+        // swallow — lobby might not have that id; dev reset should still succeed
+      }
+    }
+
+    res.json({ ok:true, reset:"claims", lobbyClosed: !!lobbyId });
+  } catch (e) {
+    res.status(500).json({ ok:false, error:String(e && e.message || e) });
+  }
+});
+
+/* ===== Ensure /v1 router is mounted ONCE ===== */
+if (!global.__ASHWOOD_LOBBY_MOUNTED__) {
+  global.__ASHWOOD_LOBBY_MOUNTED__ = true;
+  console.log("[Ashwood] Lobby endpoints mounted at /v1");
+} else {
+  console.log("[Ashwood] (skipped) lobby already mounted");
+}
+/* ===== GM/Dev helpers ===== */
+
+/** Return current claim map (debug) */
+app.get("/session/:code/claims", (req, res) => {
+  const code = String(req.params.code || "").toUpperCase();
+  const sess = SESSIONS[code];
+  if (!sess) return res.status(404).json({ ok:false, error:"Unknown session" });
+  res.json({ ok:true, claims: sess.claims || {} });
+});
+
+/** Clear claims only (soft reset for Character Select) */
+app.post("/session/:code/claims/reset", (req, res) => {
+  const code = String(req.params.code || "").toUpperCase();
+  const sess = SESSIONS[code];
+  if (!sess) return res.status(404).json({ ok:false, error:"Unknown session" });
+  sess.claims = {};
+  res.json({ ok:true });
+});
+
+/** Hard reset: clear legacy claims AND ask lobby (/v1) to close a session if provided */
+app.post("/session/:code/reset-hard", async (req, res) => {
+  try {
+    const code = String(req.params.code || "").toUpperCase();
+    const sess = SESSIONS[code];
+    if (!sess) return res.status(404).json({ ok:false, error:"Unknown session" });
+
+    // 1) clear legacy character selections
+    sess.claims = {};
+
+    // 2) if a lobby session id is specified, try closing it to drop AI/timer state
+    const lobbyId = (req.body && (req.body.sessionId || req.body.session)) || null;
+    if (lobbyId) {
+      try {
+        const r = await fetch(`http://localhost:${PORT_PRIMARY}/v1/session/${encodeURIComponent(lobbyId)}/close`, { method: "POST" });
+        // ignore status; best effort
+        await r.text().catch(()=>{});
+      } catch (e) {
+        // swallow — lobby might not have that id; dev reset should still succeed
+      }
+    }
+
+    res.json({ ok:true, reset:"claims", lobbyClosed: !!lobbyId });
+  } catch (e) {
+    res.status(500).json({ ok:false, error:String(e && e.message || e) });
+  }
+});
+
+/* ===== Ensure /v1 router is mounted ONCE ===== */
+if (!global.__ASHWOOD_LOBBY_MOUNTED__) {
+  global.__ASHWOOD_LOBBY_MOUNTED__ = true;
+  console.log("[Ashwood] Lobby endpoints mounted at /v1");
+} else {
+  console.log("[Ashwood] (skipped) lobby already mounted");
+}

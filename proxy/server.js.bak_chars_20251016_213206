@@ -1,0 +1,101 @@
+﻿// proxy/server.js
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const bodyParser = require('body-parser');
+
+// --- Basic server + health ---
+const app = express();
+app.use(cors());
+app.use(bodyParser.json());
+app.use((req,res,next)=>{ console.log('[proxy] ' + req.method + ' ' + req.url); next(); });
+const { register: registerLobby } = require('./lobby');
+registerLobby(app, '/v1');
+
+const PORT_PRIMARY = process.env.PORT || 8787;
+const PORT_SECONDARY = 5051;
+
+// --- DEV: simple in-memory sessions for Join Flow ---
+/**
+ * Each session has:
+ * - code: string (e.g., "ASH-72QK")
+ * - title: string
+ * - description: string
+ * - gmName: string
+ * - isEnhanced: boolean
+ * - background: string (theme key for now)
+ * - logo: string (emoji or URL placeholder)
+ * - startsAt: string (optional)
+ */
+const SESSIONS = {
+  "ASH-72QK": {
+    code: "ASH-72QK",
+    title: "The Founding of Ashwood & Co.",
+    description:
+      "Victorian England, 1888. You are summoned to Ashwood Hall for the reading of Ambrose Ashwood’s will. The storm is not the only thing that’s gathering...",
+    gmName: "Ambrose_Ashwood",
+    isEnhanced: true,
+    background: "victorian-manor",
+    logo: "🕯️",
+    startsAt: null
+  },
+  "HALL-1901": {
+    code: "HALL-1901",
+    title: "Ashwood Hall: The House Breathes",
+    description:
+      "Candles flare to life as the doors creak open. Portrait eyes follow. Something in the cellar doesn’t want to stay sealed.",
+    gmName: "GM_Crow",
+    isEnhanced: false,
+    background: "stormy-hall",
+    logo: "🏰",
+    startsAt: null
+  }
+};
+
+// Health endpoints
+app.get('/', (_req, res) => {
+  res.json({ ok: true, message: 'Ashwood proxy listening', ports: [PORT_PRIMARY, PORT_SECONDARY] });
+});
+app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+
+// ---- JOIN FLOW APIs ----
+
+// Validate by code (POST /session/validate { code })
+app.post('/session/validate', (req, res) => {
+  const { code } = req.body || {};
+  if (!code || typeof code !== 'string') {
+    return res.status(400).json({ ok: false, error: 'Missing or invalid `code`.' });
+  }
+  const key = code.trim().toUpperCase();
+  const session = SESSIONS[key];
+  if (!session) {
+    return res.status(404).json({ ok: false, error: 'Session not found.' });
+  }
+  // lightweight payload
+  const { title, gmName, isEnhanced, background, logo, description, startsAt } = session;
+  return res.json({
+    ok: true,
+    session: { code: key, title, gmName, isEnhanced, background, logo, description, startsAt }
+  });
+});
+
+// Fetch landing by code (GET /session/:code)
+app.get('/session/:code', (req, res) => {
+  const key = String(req.params.code || '').trim().toUpperCase();
+  const session = SESSIONS[key];
+  if (!session) return res.status(404).json({ ok: false, error: 'Session not found.' });
+  return res.json({ ok: true, session });
+});
+
+// --- (existing OpenAI proxy routes would remain here) ---
+// If you already forward /v1/chat/completions etc., keep that code below.
+
+// Start servers
+app.listen(PORT_PRIMARY, () =>
+  console.log(`Ashwood proxy listening on http://localhost:${PORT_PRIMARY}`)
+);
+
+app.listen(PORT_SECONDARY, () =>
+  console.log(`Ashwood proxy also listening on http://localhost:${PORT_SECONDARY}`)
+);
+

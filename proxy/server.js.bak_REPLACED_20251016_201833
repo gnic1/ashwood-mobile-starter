@@ -1,0 +1,643 @@
+﻿/* eslint-disable */
+require("dotenv").config();
+const express = require("express");
+const cors = require("cors");
+const bodyParser = require("body-parser");
+ 
+    /* eslint-disable */
+const app = express();
+const { register: registerLobby } = require('./lobby');
+registerLobby(app, '/v1');
+app.use(cors());
+app.use(bodyParser.json());
+const fetch = global.fetch || ((...args) => import("node-fetch").then(({ default: f }) => f(...args)));
+
+
+console.log("=== ASHWOOD PROXY v2 — selection states, AI timers, GM controls ===");
+
+const PORT_PRIMARY = process.env.PORT || 8787;
+const PORT_SECONDARY = 5051;
+
+// ------- Utilities -------
+function nowMs() { return Date.now(); }
+function msFromSec(s) { return Math.max(0, Math.floor(Number(s || 0) * 1000)); }
+// Triangular random biased to mode ~ 6 (often 5–8)
+function triRand(min=3, mode=6, max=15) {
+  const u = Math.random();
+  const c = (mode - min) / (max - min);
+  return u < c
+    ? min + Math.sqrt(u * (max - min) * (mode - min))
+    : max - Math.sqrt((1 - u) * (max - min) * (max - mode));
+}
+
+// ------- Sessions (stateful, in-memory) -------
+const SESSIONS = {
+  "ASH-72QK": {
+    code: "ASH-72QK",
+    title: "The Founding of Ashwood & Co.",
+    description: "Victorian England, 1888. You are summoned to Ashwood Hall for the reading of Ambrose Ashwood’s will. The storm is not the only thing that’s gathering...",
+    gmName: "Ambrose_Ashwood",
+    isEnhanced: true,
+    background: "victorian-manor",
+    logo: "🕯️",
+    startsAt: null,
+    settings: { rokuMaxPlayers: 0 },
+    gmType: "human",                 // 'human' | 'ai'
+    state: "selection_open",         // 'selection_open' | 'selection_locked' | 'in_game'
+    selectionSeconds: 20,
+    inactivitySeconds: 30,
+    selectionEndsAt: null,           // timestamp ms or null
+    players: [],                     // [{name, type:'human'|'ai', strikes}]
+    claims: {},                      // { [characterId]: playerName }
+    timeouts: []                     // pending timers to clear on reset/advance
+  }
+};
+
+const CHARACTERS_BASE = [
+  { id: "c1", name: "Evelyn Blackwood", role: "Historian", blurb: "Keeper of Ashwood’s forgotten records.", buffs: ["Lore Mastery (+1 Clues)", "Calm Under Pressure"], debuffs: ["Fragile Nerves (-1 in Darkness)"] },
+  { id: "c2", name: "Inspector Marlowe", role: "Detective", blurb: "A skeptic drawn by unsolved curiosities.", buffs: ["Interrogator (+1 Persuasion)", "Keen Eye"], debuffs: ["Stubborn (Disadvantage on Supernatural Advice)"] },
+  { id: "c3", name: "Sister Agnes", role: "Nun", blurb: "Whispers warn her: the house remembers.", buffs: ["Sanctified Aura (Ward off Fear)", "Empathy"], debuffs: ["Vow of Silence (Limited Dialogue Choices)"] },
+  { id: "c4", name: "Thomas Whitaker", role: "Barrister", blurb: "Executor of Ambrose’s last will.", buffs: ["Legalese (+1 Contracts)", "Connections in High Places"], debuffs: ["Public Figure (Easily Recognized)"] }
+];
+
+// quick helpers
+function ensureSession(code) {
+  const key = String(code || "").trim().toUpperCase();
+  const s = SESSIONS[key];
+  if (!s) return { key, session: null };
+  if (!s.players) s.players = [];
+  if (!s.claims) s.claims = {};
+  if (!s.timeouts) s.timeouts = [];
+  return { key, session: s };
+}
+function clearTimers(sess) {
+  (sess.timeouts || []).forEach(t => clearTimeout(t));
+  sess.timeouts = [];
+}
+function schedule(sess, fn, delayMs) {
+  const t = setTimeout(fn, delayMs);
+  sess.timeouts.push(t);
+}
+function characterById(id) {
+  return CHARACTERS_BASE.find(c => c.id === id) || null;
+}
+function availableIds(sess) {
+  const taken = new Set(Object.keys(sess.claims || {}));
+  return CHARACTERS_BASE.map(c => c.id).filter(id => !taken.has(id));
+}
+
+// ------- Health & version -------
+app.get("/", (_req, res) => res.json({ ok: true, message: "Ashwood proxy listening", ports: [PORT_PRIMARY, PORT_SECONDARY] }));
+app.get("/_version", (_req, res) => res.json({ ok: true, version: "proxy-v2-ai-gm", ts: new Date().toISOString() }));
+
+// ------- Join Flow base -------
+app.post("/session/validate", (req, res) => {
+  const { code } = req.body || {};
+  if (!code) return res.status(400).json({ ok: false, error: "Missing `code`" });
+  const { key, session } = ensureSession(code);
+  if (!session) return res.status(404).json({ ok: false, error: "Session not found." });
+  const { title, gmName, isEnhanced, background, logo, description, startsAt, settings, gmType, state, selectionSeconds } = session;
+  res.json({ ok: true, session: { code: key, title, gmName, isEnhanced, background, logo, description, startsAt, settings, gmType, state, selectionSeconds } });
+});
+
+app.get("/session/:code", (req, res) => {
+  const { key, session } = ensureSession(req.params.code);
+  if (!session) return res.status(404).json({ ok: false, error: "Session not found." });
+  res.json({ ok: true, session });
+});
+
+// characters list (buffs only, debuffs hidden)
+app.get("/session/:code/characters", (req, res) => {
+  const { key, session } = ensureSession(req.params.code);
+  if (!session) return res.status(404).json({ ok: false, error: "Session not found." });
+  const chars = CHARACTERS_BASE.map(c => {
+    const claimedBy = session.claims[c.id] || null;
+    const { debuffs, ...safe } = c;
+    return { ...safe, debuffsHidden: true, claimedBy, available: !claimedBy };
+  });
+  res.json({ ok: true, code: key, characters: chars });
+});
+
+// full character (for next screen)
+app.get("/session/:code/character/:id", (req, res) => {
+  const { session } = ensureSession(req.params.code);
+  if (!session) return res.status(404).json({ ok: false, error: "Session not found." });
+  const c = characterById(req.params.id);
+  if (!c) return res.status(404).json({ ok: false, error: "Character not found." });
+  res.json({ ok: true, character: { ...c, claimedBy: session.claims[c.id] || null } });
+});
+
+// claim (one per player)
+app.post("/session/:code/claim", (req, res) => {
+  const { session } = ensureSession(req.params.code);
+  if (!session) return res.status(404).json({ ok: false, error: "Session not found." });
+  if (session.state !== "selection_open") return res.status(409).json({ ok: false, error: "Selection closed." });
+
+  const { characterId, playerName } = req.body || {};
+  if (!characterId || !playerName) return res.status(400).json({ ok: false, error: "Missing `characterId` or `playerName`." });
+
+  const c = characterById(characterId);
+  if (!c) return res.status(404).json({ ok: false, error: "Character not found." });
+
+  // enforce 1-per-player
+  const already = Object.entries(session.claims).find(([_cid, who]) => who === playerName);
+  if (already && already[0] !== characterId) return res.status(409).json({ ok: false, error: "Player already selected a character." });
+
+  const takenBy = session.claims[characterId] || null;
+  if (takenBy && takenBy !== playerName) return res.status(409).json({ ok: false, error: "Character already claimed.", claimedBy: takenBy });
+
+  // ensure player roster
+  if (!session.players.find(p => p.name === playerName)) {
+    session.players.push({ name: playerName, type: "human", strikes: 0 });
+  }
+
+  session.claims[characterId] = playerName;
+
+  // respond with updated list (buffs only)
+  const chars = CHARACTERS_BASE.map(x => {
+    const claimedBy = session.claims[x.id] || null;
+    const { debuffs, ...safe } = x;
+    return { ...safe, debuffsHidden: true, claimedBy, available: !claimedBy };
+  });
+  res.json({ ok: true, code: session.code, claimed: { characterId, playerName }, characters: chars });
+});
+
+// ------- GM & AI controls -------
+
+// configure GM + timers
+app.post("/session/:code/config", (req, res) => {
+  const { session } = ensureSession(req.params.code);
+  if (!session) return res.status(404).json({ ok: false, error: "Session not found." });
+  const { gmType, selectionSeconds, inactivitySeconds, aiPlayers } = req.body || {};
+  if (gmType === "human" || gmType === "ai") session.gmType = gmType;
+  if (selectionSeconds != null) session.selectionSeconds = Number(selectionSeconds) || 20;
+  if (inactivitySeconds != null) session.inactivitySeconds = Number(inactivitySeconds) || 30;
+
+  // optional: seed AI players list (names)
+  if (Array.isArray(aiPlayers)) {
+    aiPlayers.forEach(n => {
+      if (typeof n === "string" && !session.players.find(p => p.name === n)) {
+        session.players.push({ name: n, type: "ai", strikes: 0 });
+      }
+    });
+  }
+
+  res.json({ ok: true, config: { gmType: session.gmType, selectionSeconds: session.selectionSeconds, inactivitySeconds: session.inactivitySeconds } });
+});
+
+// status snapshot
+app.get("/session/:code/status", (req, res) => {
+  const { session } = ensureSession(req.params.code);
+  if (!session) return res.status(404).json({ ok: false, error: "Session not found." });
+  const players = session.players.map(p => ({ name: p.name, type: p.type, strikes: p.strikes || 0, characterId: Object.entries(session.claims).find(([_id, who]) => who === p.name)?.[0] || null }));
+  res.json({ ok: true, code: session.code, state: session.state, selectionEndsAt: session.selectionEndsAt, players, claims: session.claims });
+});
+
+// human GM force-start
+app.post("/session/:code/start", (req, res) => {
+  const { session } = ensureSession(req.params.code);
+  if (!session) return res.status(404).json({ ok: false, error: "Session not found." });
+  const { bootIfUnclaimed } = req.body || {};
+  if (session.state !== "selection_open") return res.status(409).json({ ok: false, error: "Already started." });
+
+  clearTimers(session);
+  session.state = "selection_locked";
+  session.selectionEndsAt = null;
+
+  let booted = [];
+  if (bootIfUnclaimed) {
+    const claimedPlayers = new Set(Object.values(session.claims));
+    const toBoot = session.players.filter(p => p.type === "human" && !claimedPlayers.has(p.name));
+    booted = toBoot.map(p => p.name);
+    session.players = session.players.filter(p => !toBoot.includes(p));
+  }
+  res.json({ ok: true, state: session.state, booted });
+});
+
+// kick player
+app.post("/session/:code/kick", (req, res) => {
+  const { session } = ensureSession(req.params.code);
+  if (!session) return res.status(404).json({ ok: false, error: "Session not found." });
+  const { playerName } = req.body || {};
+  if (!playerName) return res.status(400).json({ ok: false, error: "Missing `playerName`" });
+
+  session.players = session.players.filter(p => p.name !== playerName);
+  // release any claim by that player
+  Object.keys(session.claims).forEach(cid => {
+    if (session.claims[cid] === playerName) delete session.claims[cid];
+  });
+  res.json({ ok: true });
+});
+
+// helper to (re)start AI selection timers when AI GM is chosen
+function startAiSelection(session) {
+  clearTimers(session);
+  session.state = "selection_open";
+  const capMs = msFromSec(session.selectionSeconds || 20);
+  session.selectionEndsAt = nowMs() + capMs;
+
+  // schedule each AI player to claim at their own random delay
+  const aiPlayers = session.players.filter(p => p.type === "ai");
+  const idsPool = () => availableIds(session);
+
+  aiPlayers.forEach((p) => {
+    const dSec = triRand(3, 6, 15);
+    const delay = Math.min(msFromSec(dSec), capMs - 1000); // ensure before cap
+    schedule(session, () => {
+      const pool = idsPool();
+      if (!pool.length) return;
+      // pick randomly
+      const characterId = pool[Math.floor(Math.random() * pool.length)];
+      session.claims[characterId] = p.name;
+    }, delay);
+  });
+
+  // cap: auto-assign remaining humans at deadline
+  schedule(session, () => {
+    const pool = availableIds(session);
+    const humanUnclaimed = session.players.filter(p => p.type === "human" && !Object.values(session.claims).includes(p.name));
+    while (pool.length && humanUnclaimed.length) {
+      const cid = pool.pop();
+      const human = humanUnclaimed.pop();
+      session.claims[cid] = human.name;
+    }
+    session.state = "selection_locked";
+    session.selectionEndsAt = null;
+  }, capMs);
+}
+
+// switch GM type and (if AI) start timers
+app.post("/session/:code/ai/start", (req, res) => {
+  const { session } = ensureSession(req.params.code);
+  if (!session) return res.status(404).json({ ok: false, error: "Session not found." });
+  session.gmType = "ai";
+  if (!session.players.find(p => p.type === "ai")) {
+    // default a couple of AI players if none provided
+    session.players.push({ name: "AI-Edgar", type: "ai", strikes: 0 });
+    session.players.push({ name: "AI-Beatrice", type: "ai", strikes: 0 });
+  }
+  startAiSelection(session);
+  res.json({ ok: true, gmType: session.gmType, state: session.state, selectionEndsAt: session.selectionEndsAt });
+});
+
+// -------- Roku & misc settings --------
+app.post("/session/:code/settings", (req, res) => {
+  const { session } = ensureSession(req.params.code);
+  if (!session) return res.status(404).json({ ok: false, error: "Session not found." });
+  const { rokuMaxPlayers } = req.body || {};
+  if (typeof rokuMaxPlayers === "number" && rokuMaxPlayers >= 0) {
+    session.settings.rokuMaxPlayers = Math.floor(rokuMaxPlayers);
+  }
+  res.json({ ok: true, settings: session.settings });
+});
+
+// -------- OpenAI passthrough --------
+const OPENAI_BASE = process.env.OPENAI_BASE || "https://api.openai.com";
+const OPENAI_KEY = process.env.OPENAI_API_KEY;
+function requireKey(res) { if (!OPENAI_KEY) { res.status(500).json({ ok: false, error: "OPENAI_API_KEY missing on proxy server" }); return false; } return true; }
+
+app.post("/v1/chat/completions", async (req, res) => {
+  if (!requireKey(res)) return;
+  try {
+    const r = await fetch(`${OPENAI_BASE}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${OPENAI_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify(req.body || {})
+    });
+    const text = await r.text();
+    res.status(r.status).type("application/json").send(text);
+  } catch (e) { res.status(500).json({ ok: false, error: String(e) }); }
+});
+
+app.get("/v1/models", async (_req, res) => {
+  if (!requireKey(res)) return;
+  try {
+    const r = await fetch(`${OPENAI_BASE}/v1/models`, { headers: { "Authorization": `Bearer ${OPENAI_KEY}` } });
+    const text = await r.text();
+    res.status(r.status).type("application/json").send(text);
+  } catch (e) { res.status(500).json({ ok: false, error: String(e) }); }
+});
+
+// -------- 404 --------
+app.use((_req, res) => res.status(404).json({ ok: false, error: "Not found" }));
+
+// -------- Start --------
+app.listen(PORT_PRIMARY, () => console.log(`Ashwood proxy listening on http://localhost:${PORT_PRIMARY}`));
+app.listen(PORT_SECONDARY, () => console.log(`Ashwood proxy also listening on http://localhost:${PORT_SECONDARY}`));
+
+// Ashwood Phase 2: Lobby endpoints
+  
+
+
+console.log("=== ASHWOOD PROXY v2 — selection states, AI timers, GM controls ===");
+
+
+// ------- Utilities -------
+function nowMs() { return Date.now(); }
+function msFromSec(s) { return Math.max(0, Math.floor(Number(s || 0) * 1000)); }
+// Triangular random biased to mode ~ 6 (often 5–8)
+function triRand(min=3, mode=6, max=15) {
+  const u = Math.random();
+  const c = (mode - min) / (max - min);
+  return u < c
+    ? min + Math.sqrt(u * (max - min) * (mode - min))
+    : max - Math.sqrt((1 - u) * (max - min) * (max - mode));
+}
+
+// ------- Sessions (stateful, in-memory) -------
+const SESSIONS = {
+  "ASH-72QK": {
+    code: "ASH-72QK",
+    title: "The Founding of Ashwood & Co.",
+    description: "Victorian England, 1888. You are summoned to Ashwood Hall for the reading of Ambrose Ashwood’s will. The storm is not the only thing that’s gathering...",
+    gmName: "Ambrose_Ashwood",
+    isEnhanced: true,
+    background: "victorian-manor",
+    logo: "🕯️",
+    startsAt: null,
+    settings: { rokuMaxPlayers: 0 },
+    gmType: "human",                 // 'human' | 'ai'
+    state: "selection_open",         // 'selection_open' | 'selection_locked' | 'in_game'
+    selectionSeconds: 20,
+    inactivitySeconds: 30,
+    selectionEndsAt: null,           // timestamp ms or null
+    players: [],                     // [{name, type:'human'|'ai', strikes}]
+    claims: {},                      // { [characterId]: playerName }
+    timeouts: []                     // pending timers to clear on reset/advance
+  }
+};
+
+const CHARACTERS_BASE = [
+  { id: "c1", name: "Evelyn Blackwood", role: "Historian", blurb: "Keeper of Ashwood’s forgotten records.", buffs: ["Lore Mastery (+1 Clues)", "Calm Under Pressure"], debuffs: ["Fragile Nerves (-1 in Darkness)"] },
+  { id: "c2", name: "Inspector Marlowe", role: "Detective", blurb: "A skeptic drawn by unsolved curiosities.", buffs: ["Interrogator (+1 Persuasion)", "Keen Eye"], debuffs: ["Stubborn (Disadvantage on Supernatural Advice)"] },
+  { id: "c3", name: "Sister Agnes", role: "Nun", blurb: "Whispers warn her: the house remembers.", buffs: ["Sanctified Aura (Ward off Fear)", "Empathy"], debuffs: ["Vow of Silence (Limited Dialogue Choices)"] },
+  { id: "c4", name: "Thomas Whitaker", role: "Barrister", blurb: "Executor of Ambrose’s last will.", buffs: ["Legalese (+1 Contracts)", "Connections in High Places"], debuffs: ["Public Figure (Easily Recognized)"] }
+];
+
+// quick helpers
+function ensureSession(code) {
+  const key = String(code || "").trim().toUpperCase();
+  const s = SESSIONS[key];
+  if (!s) return { key, session: null };
+  if (!s.players) s.players = [];
+  if (!s.claims) s.claims = {};
+  if (!s.timeouts) s.timeouts = [];
+  return { key, session: s };
+}
+function clearTimers(sess) {
+  (sess.timeouts || []).forEach(t => clearTimeout(t));
+  sess.timeouts = [];
+}
+function schedule(sess, fn, delayMs) {
+  const t = setTimeout(fn, delayMs);
+  sess.timeouts.push(t);
+}
+function characterById(id) {
+  return CHARACTERS_BASE.find(c => c.id === id) || null;
+}
+function availableIds(sess) {
+  const taken = new Set(Object.keys(sess.claims || {}));
+  return CHARACTERS_BASE.map(c => c.id).filter(id => !taken.has(id));
+}
+
+// ------- Health & version -------
+app.get("/", (_req, res) => res.json({ ok: true, message: "Ashwood proxy listening", ports: [PORT_PRIMARY, PORT_SECONDARY] }));
+app.get("/_version", (_req, res) => res.json({ ok: true, version: "proxy-v2-ai-gm", ts: new Date().toISOString() }));
+
+// ------- Join Flow base -------
+app.post("/session/validate", (req, res) => {
+  const { code } = req.body || {};
+  if (!code) return res.status(400).json({ ok: false, error: "Missing `code`" });
+  const { key, session } = ensureSession(code);
+  if (!session) return res.status(404).json({ ok: false, error: "Session not found." });
+  const { title, gmName, isEnhanced, background, logo, description, startsAt, settings, gmType, state, selectionSeconds } = session;
+  res.json({ ok: true, session: { code: key, title, gmName, isEnhanced, background, logo, description, startsAt, settings, gmType, state, selectionSeconds } });
+});
+
+app.get("/session/:code", (req, res) => {
+  const { key, session } = ensureSession(req.params.code);
+  if (!session) return res.status(404).json({ ok: false, error: "Session not found." });
+  res.json({ ok: true, session });
+});
+
+// characters list (buffs only, debuffs hidden)
+app.get("/session/:code/characters", (req, res) => {
+  const { key, session } = ensureSession(req.params.code);
+  if (!session) return res.status(404).json({ ok: false, error: "Session not found." });
+  const chars = CHARACTERS_BASE.map(c => {
+    const claimedBy = session.claims[c.id] || null;
+    const { debuffs, ...safe } = c;
+    return { ...safe, debuffsHidden: true, claimedBy, available: !claimedBy };
+  });
+  res.json({ ok: true, code: key, characters: chars });
+});
+
+// full character (for next screen)
+app.get("/session/:code/character/:id", (req, res) => {
+  const { session } = ensureSession(req.params.code);
+  if (!session) return res.status(404).json({ ok: false, error: "Session not found." });
+  const c = characterById(req.params.id);
+  if (!c) return res.status(404).json({ ok: false, error: "Character not found." });
+  res.json({ ok: true, character: { ...c, claimedBy: session.claims[c.id] || null } });
+});
+
+// claim (one per player)
+app.post("/session/:code/claim", (req, res) => {
+  const { session } = ensureSession(req.params.code);
+  if (!session) return res.status(404).json({ ok: false, error: "Session not found." });
+  if (session.state !== "selection_open") return res.status(409).json({ ok: false, error: "Selection closed." });
+
+  const { characterId, playerName } = req.body || {};
+  if (!characterId || !playerName) return res.status(400).json({ ok: false, error: "Missing `characterId` or `playerName`." });
+
+  const c = characterById(characterId);
+  if (!c) return res.status(404).json({ ok: false, error: "Character not found." });
+
+  // enforce 1-per-player
+  const already = Object.entries(session.claims).find(([_cid, who]) => who === playerName);
+  if (already && already[0] !== characterId) return res.status(409).json({ ok: false, error: "Player already selected a character." });
+
+  const takenBy = session.claims[characterId] || null;
+  if (takenBy && takenBy !== playerName) return res.status(409).json({ ok: false, error: "Character already claimed.", claimedBy: takenBy });
+
+  // ensure player roster
+  if (!session.players.find(p => p.name === playerName)) {
+    session.players.push({ name: playerName, type: "human", strikes: 0 });
+  }
+
+  session.claims[characterId] = playerName;
+
+  // respond with updated list (buffs only)
+  const chars = CHARACTERS_BASE.map(x => {
+    const claimedBy = session.claims[x.id] || null;
+    const { debuffs, ...safe } = x;
+    return { ...safe, debuffsHidden: true, claimedBy, available: !claimedBy };
+  });
+  res.json({ ok: true, code: session.code, claimed: { characterId, playerName }, characters: chars });
+});
+
+// ------- GM & AI controls -------
+
+// configure GM + timers
+app.post("/session/:code/config", (req, res) => {
+  const { session } = ensureSession(req.params.code);
+  if (!session) return res.status(404).json({ ok: false, error: "Session not found." });
+  const { gmType, selectionSeconds, inactivitySeconds, aiPlayers } = req.body || {};
+  if (gmType === "human" || gmType === "ai") session.gmType = gmType;
+  if (selectionSeconds != null) session.selectionSeconds = Number(selectionSeconds) || 20;
+  if (inactivitySeconds != null) session.inactivitySeconds = Number(inactivitySeconds) || 30;
+
+  // optional: seed AI players list (names)
+  if (Array.isArray(aiPlayers)) {
+    aiPlayers.forEach(n => {
+      if (typeof n === "string" && !session.players.find(p => p.name === n)) {
+        session.players.push({ name: n, type: "ai", strikes: 0 });
+      }
+    });
+  }
+
+  res.json({ ok: true, config: { gmType: session.gmType, selectionSeconds: session.selectionSeconds, inactivitySeconds: session.inactivitySeconds } });
+});
+
+// status snapshot
+app.get("/session/:code/status", (req, res) => {
+  const { session } = ensureSession(req.params.code);
+  if (!session) return res.status(404).json({ ok: false, error: "Session not found." });
+  const players = session.players.map(p => ({ name: p.name, type: p.type, strikes: p.strikes || 0, characterId: Object.entries(session.claims).find(([_id, who]) => who === p.name)?.[0] || null }));
+  res.json({ ok: true, code: session.code, state: session.state, selectionEndsAt: session.selectionEndsAt, players, claims: session.claims });
+});
+
+// human GM force-start
+app.post("/session/:code/start", (req, res) => {
+  const { session } = ensureSession(req.params.code);
+  if (!session) return res.status(404).json({ ok: false, error: "Session not found." });
+  const { bootIfUnclaimed } = req.body || {};
+  if (session.state !== "selection_open") return res.status(409).json({ ok: false, error: "Already started." });
+
+  clearTimers(session);
+  session.state = "selection_locked";
+  session.selectionEndsAt = null;
+
+  let booted = [];
+  if (bootIfUnclaimed) {
+    const claimedPlayers = new Set(Object.values(session.claims));
+    const toBoot = session.players.filter(p => p.type === "human" && !claimedPlayers.has(p.name));
+    booted = toBoot.map(p => p.name);
+    session.players = session.players.filter(p => !toBoot.includes(p));
+  }
+  res.json({ ok: true, state: session.state, booted });
+});
+
+// kick player
+app.post("/session/:code/kick", (req, res) => {
+  const { session } = ensureSession(req.params.code);
+  if (!session) return res.status(404).json({ ok: false, error: "Session not found." });
+  const { playerName } = req.body || {};
+  if (!playerName) return res.status(400).json({ ok: false, error: "Missing `playerName`" });
+
+  session.players = session.players.filter(p => p.name !== playerName);
+  // release any claim by that player
+  Object.keys(session.claims).forEach(cid => {
+    if (session.claims[cid] === playerName) delete session.claims[cid];
+  });
+  res.json({ ok: true });
+});
+
+// helper to (re)start AI selection timers when AI GM is chosen
+function startAiSelection(session) {
+  clearTimers(session);
+  session.state = "selection_open";
+  const capMs = msFromSec(session.selectionSeconds || 20);
+  session.selectionEndsAt = nowMs() + capMs;
+
+  // schedule each AI player to claim at their own random delay
+  const aiPlayers = session.players.filter(p => p.type === "ai");
+  const idsPool = () => availableIds(session);
+
+  aiPlayers.forEach((p) => {
+    const dSec = triRand(3, 6, 15);
+    const delay = Math.min(msFromSec(dSec), capMs - 1000); // ensure before cap
+    schedule(session, () => {
+      const pool = idsPool();
+      if (!pool.length) return;
+      // pick randomly
+      const characterId = pool[Math.floor(Math.random() * pool.length)];
+      session.claims[characterId] = p.name;
+    }, delay);
+  });
+
+  // cap: auto-assign remaining humans at deadline
+  schedule(session, () => {
+    const pool = availableIds(session);
+    const humanUnclaimed = session.players.filter(p => p.type === "human" && !Object.values(session.claims).includes(p.name));
+    while (pool.length && humanUnclaimed.length) {
+      const cid = pool.pop();
+      const human = humanUnclaimed.pop();
+      session.claims[cid] = human.name;
+    }
+    session.state = "selection_locked";
+    session.selectionEndsAt = null;
+  }, capMs);
+}
+
+// switch GM type and (if AI) start timers
+app.post("/session/:code/ai/start", (req, res) => {
+  const { session } = ensureSession(req.params.code);
+  if (!session) return res.status(404).json({ ok: false, error: "Session not found." });
+  session.gmType = "ai";
+  if (!session.players.find(p => p.type === "ai")) {
+    // default a couple of AI players if none provided
+    session.players.push({ name: "AI-Edgar", type: "ai", strikes: 0 });
+    session.players.push({ name: "AI-Beatrice", type: "ai", strikes: 0 });
+  }
+  startAiSelection(session);
+  res.json({ ok: true, gmType: session.gmType, state: session.state, selectionEndsAt: session.selectionEndsAt });
+});
+
+// -------- Roku & misc settings --------
+app.post("/session/:code/settings", (req, res) => {
+  const { session } = ensureSession(req.params.code);
+  if (!session) return res.status(404).json({ ok: false, error: "Session not found." });
+  const { rokuMaxPlayers } = req.body || {};
+  if (typeof rokuMaxPlayers === "number" && rokuMaxPlayers >= 0) {
+    session.settings.rokuMaxPlayers = Math.floor(rokuMaxPlayers);
+  }
+  res.json({ ok: true, settings: session.settings });
+});
+
+// -------- OpenAI passthrough --------
+const OPENAI_BASE = process.env.OPENAI_BASE || "https://api.openai.com";
+const OPENAI_KEY = process.env.OPENAI_API_KEY;
+function requireKey(res) { if (!OPENAI_KEY) { res.status(500).json({ ok: false, error: "OPENAI_API_KEY missing on proxy server" }); return false; } return true; }
+
+app.post("/v1/chat/completions", async (req, res) => {
+  if (!requireKey(res)) return;
+  try {
+    const r = await fetch(`${OPENAI_BASE}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${OPENAI_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify(req.body || {})
+    });
+    const text = await r.text();
+    res.status(r.status).type("application/json").send(text);
+  } catch (e) { res.status(500).json({ ok: false, error: String(e) }); }
+});
+
+app.get("/v1/models", async (_req, res) => {
+  if (!requireKey(res)) return;
+  try {
+    const r = await fetch(`${OPENAI_BASE}/v1/models`, { headers: { "Authorization": `Bearer ${OPENAI_KEY}` } });
+    const text = await r.text();
+    res.status(r.status).type("application/json").send(text);
+  } catch (e) { res.status(500).json({ ok: false, error: String(e) }); }
+});
+
+// -------- 404 --------
+app.use((_req, res) => res.status(404).json({ ok: false, error: "Not found" }));
+
+// -------- Start --------
+app.listen(PORT_PRIMARY, () => console.log(`Ashwood proxy listening on http://localhost:${PORT_PRIMARY}`));
+app.listen(PORT_SECONDARY, () => console.log(`Ashwood proxy also listening on http://localhost:${PORT_SECONDARY}`));
+
+// Ashwood Phase 2: Lobby endpoints
+
