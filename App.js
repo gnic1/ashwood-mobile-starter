@@ -1,54 +1,101 @@
 ﻿import * as React from "react";
 import { useEffect, useRef, useState } from "react";
-import { Button, FlatList, SafeAreaView, Text, TextInput, View } from "react-native";
+import { Alert, Button, FlatList, SafeAreaView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
+import * as Clipboard from "expo-clipboard";
 
-// -------- API helper --------
 const API_BASE = process.env.EXPO_PUBLIC_API_BASE || "http://10.0.2.2:8787";
+
+// --- tiny fetch helper with good errors ---
 async function api(path, opts) {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { "Content-Type": "application/json" },
     ...opts,
   });
-  const json = await res.json().catch(() => ({}));
+  let json = null;
+  try {
+    json = await res.json();
+  } catch {
+    // not JSON (avoid blowing up)
+  }
   if (!res.ok || json?.ok === false) {
-    const msg = json?.error?.message || `HTTP ${res.status}`;
+    const msg =
+      json?.error?.message ||
+      (res.status === 404 ? "Session not found" :
+       res.status === 409 ? "Session is closed" :
+       `Request failed (HTTP ${res.status})`);
     throw new Error(msg);
   }
-  return json.data ?? json;
+  return json?.data ?? json;
 }
+
+const CODE_RE = /^[A-HJ-KMNP-Z2-9]{5}$/i; // excludes I, L, O, 0, 1 for clarity
 
 function HomeScreen({ navigation }) {
   const [name, setName] = useState("GM");
   const [code, setCode] = useState("");
+  const [err, setErr] = useState("");
 
   const onCreate = async () => {
-    const data = await api("/create-session", {
-      method: "POST",
-      body: JSON.stringify({ name }),
-    });
-    navigation.navigate("Lobby", { code: data.code, playerId: data.players[0].id, isGM: true });
+    setErr("");
+    try {
+      const data = await api("/create-session", {
+        method: "POST",
+        body: JSON.stringify({ name: name.trim() || "GM" }),
+      });
+      navigation.navigate("Lobby", {
+        code: data.code,
+        playerId: data.players[0].id,
+        isGM: true,
+      });
+    } catch (e) {
+      setErr(String(e.message || e));
+    }
   };
 
   const onJoin = async () => {
-    const data = await api("/join-session", {
-      method: "POST",
-      body: JSON.stringify({ code: code.trim(), name }),
-    });
-    navigation.navigate("Lobby", { code: data.session.code, playerId: data.player.id, isGM: false });
+    setErr("");
+    const cleaned = code.trim().toUpperCase();
+    if (!CODE_RE.test(cleaned)) {
+      setErr("Enter a valid 5-character code (A–Z, 2–9).");
+      return;
+    }
+    if (!name.trim()) {
+      setErr("Please enter your display name.");
+      return;
+    }
+    try {
+      const data = await api("/join-session", {
+        method: "POST",
+        body: JSON.stringify({ code: cleaned, name: name.trim() }),
+      });
+      navigation.navigate("Lobby", {
+        code: data.session.code,
+        playerId: data.player.id,
+        isGM: false,
+      });
+    } catch (e) {
+      setErr(String(e.message || e));
+    }
   };
 
   return (
     <SafeAreaView style={{ flex: 1, padding: 16, gap: 12 }}>
       <Text style={{ fontSize: 24, fontWeight: "700" }}>Ashwood & Co. — Lobby</Text>
 
-      <Text style={{ marginTop: 12 }}>Your Name</Text>
+      {!!err && (
+        <View style={{ backgroundColor: "#fee2e2", borderColor: "#fca5a5", borderWidth: 1, padding: 8, borderRadius: 6 }}>
+          <Text style={{ color: "#991b1b" }}>{err}</Text>
+        </View>
+      )}
+
+      <Text style={{ marginTop: 8 }}>Your Name</Text>
       <TextInput
         value={name}
         onChangeText={setName}
         placeholder="Enter your display name"
-        style={{ borderWidth: 1, padding: 8, borderRadius: 6 }}
+        style={{ borderWidth: 1, padding: 10, borderRadius: 8 }}
       />
 
       <View style={{ height: 8 }} />
@@ -58,11 +105,11 @@ function HomeScreen({ navigation }) {
       <Text>Join by Code</Text>
       <TextInput
         value={code}
-        onChangeText={t => setCode(t.toUpperCase())}
+        onChangeText={(t) => setCode(t.toUpperCase())}
         placeholder="ABCDE"
         autoCapitalize="characters"
         maxLength={5}
-        style={{ borderWidth: 1, padding: 8, borderRadius: 6, letterSpacing: 4 }}
+        style={{ borderWidth: 1, padding: 10, borderRadius: 8, letterSpacing: 4 }}
       />
       <View style={{ height: 8 }} />
       <Button title="Join Game" onPress={onJoin} />
@@ -70,10 +117,23 @@ function HomeScreen({ navigation }) {
   );
 }
 
+function Badge({ text, bg = "#e5e7eb", color = "#111827" }) {
+  return (
+    <View style={{ backgroundColor: bg, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999, marginLeft: 6 }}>
+      <Text style={{ color, fontSize: 12, fontWeight: "700" }}>{text}</Text>
+    </View>
+  );
+}
+
+function Row({ children }) {
+  return <View style={{ paddingVertical: 10, borderBottomWidth: 1, borderColor: "#eee" }}>{children}</View>;
+}
+
 function LobbyScreen({ route, navigation }) {
   const { code, playerId, isGM } = route.params;
   const [session, setSession] = useState(null);
   const [err, setErr] = useState("");
+  const [copied, setCopied] = useState(false);
   const pollRef = useRef(null);
 
   const load = async () => {
@@ -93,40 +153,80 @@ function LobbyScreen({ route, navigation }) {
   }, []);
 
   const setReady = async (ready) => {
-    await api(`/lobby/${code}/ready`, {
-      method: "POST",
-      body: JSON.stringify({ playerId, ready }),
-    });
-    load();
+    try {
+      await api(`/lobby/${code}/ready`, {
+        method: "POST",
+        body: JSON.stringify({ playerId, ready }),
+      });
+      load();
+    } catch (e) {
+      setErr(String(e.message || e));
+    }
   };
 
   const leave = async () => {
-    await api(`/lobby/${code}/leave`, {
-      method: "POST",
-      body: JSON.stringify({ playerId }),
-    });
-    navigation.popToTop();
+    try {
+      await api(`/lobby/${code}/leave`, {
+        method: "POST",
+        body: JSON.stringify({ playerId }),
+      });
+      navigation.popToTop();
+    } catch (e) {
+      setErr(String(e.message || e));
+    }
   };
 
   const gmReset = async () => {
-    await api(`/lobby/${code}/reset`, { method: "POST" });
-    load();
+    try {
+      await api(`/lobby/${code}/reset`, { method: "POST" });
+      load();
+    } catch (e) {
+      setErr(String(e.message || e));
+    }
   };
-
   const gmClose = async () => {
-    await api(`/lobby/${code}/close`, { method: "POST" });
-    load();
+    try {
+      await api(`/lobby/${code}/close`, { method: "POST" });
+      load();
+    } catch (e) {
+      setErr(String(e.message || e));
+    }
+  };
+  const gmReopen = async () => {
+    try {
+      await api(`/lobby/${code}/reopen`, { method: "POST" });
+      load();
+    } catch (e) {
+      setErr(String(e.message || e));
+    }
   };
 
-  const gmReopen = async () => {
-    await api(`/lobby/${code}/reopen`, { method: "POST" });
-    load();
+  const copyCode = async () => {
+    try {
+      await Clipboard.setStringAsync(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      Alert.alert("Copy Failed", "Could not copy the code to clipboard.");
+    }
   };
+
+  const me = session?.players?.find?.((p) => p.id === playerId);
 
   return (
     <SafeAreaView style={{ flex: 1, padding: 16 }}>
-      <Text style={{ fontSize: 22, fontWeight: "700" }}>Lobby: {code}</Text>
-      {!!err && <Text style={{ color: "red", marginTop: 6 }}>{err}</Text>}
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+        <Text style={{ fontSize: 22, fontWeight: "700" }}>Lobby: {code}</Text>
+        <TouchableOpacity onPress={copyCode} style={{ paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderRadius: 8 }}>
+          <Text>{copied ? "Copied!" : "Copy Code"}</Text>
+        </TouchableOpacity>
+      </View>
+
+      {!!err && (
+        <View style={{ marginTop: 8, backgroundColor: "#fee2e2", borderColor: "#fca5a5", borderWidth: 1, padding: 8, borderRadius: 6 }}>
+          <Text style={{ color: "#991b1b" }}>{err}</Text>
+        </View>
+      )}
 
       <View style={{ height: 10 }} />
       <Text>Status: {session?.status ?? "…"}</Text>
@@ -136,14 +236,22 @@ function LobbyScreen({ route, navigation }) {
       <FlatList
         data={session?.players ?? []}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <View style={{ paddingVertical: 8, borderBottomWidth: 1, borderColor: "#ddd" }}>
-            <Text style={{ fontWeight: "600" }}>
-              {item.name} {item.id === playerId ? "(You)" : ""} {item.role === "gm" ? "— GM" : ""}
-            </Text>
-            <Text>Ready: {item.ready ? "✅" : "❌"}</Text>
-          </View>
-        )}
+        renderItem={({ item }) => {
+          const isYou = item.id === playerId;
+          const isGm = item.role === "gm";
+          return (
+            <Row>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                <View style={{ flexDirection: "row", alignItems: "center" }}>
+                  <Text style={{ fontWeight: "700" }}>{item.name}</Text>
+                  {isYou && <Badge text="YOU" bg="#dbeafe" color="#1e3a8a" />}
+                  {isGm && <Badge text="GM" bg="#fef9c3" color="#854d0e" />}
+                </View>
+                <Text style={{ fontSize: 16 }}>{item.ready ? "✅ Ready" : "⏳ Not Ready"}</Text>
+              </View>
+            </Row>
+          );
+        }}
       />
 
       <View style={{ height: 12 }} />
