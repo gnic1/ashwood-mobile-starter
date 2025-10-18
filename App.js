@@ -1,45 +1,66 @@
 ﻿import * as React from "react";
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, FlatList, SafeAreaView, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { NavigationContainer } from "@react-navigation/native";
+import { ActivityIndicator, Alert, Button, FlatList, SafeAreaView, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { NavigationContainer, useNavigation } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import * as Clipboard from "expo-clipboard";
 
 const API_BASE = process.env.EXPO_PUBLIC_API_BASE || "http://10.0.2.2:8787";
 
-// --- tiny fetch helper with good errors ---
 async function api(path, opts) {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { "Content-Type": "application/json" },
     ...opts,
   });
   let json = null;
-  try {
-    json = await res.json();
-  } catch {
-    // not JSON (avoid blowing up)
-  }
+  try { json = await res.json(); } catch {}
   if (!res.ok || json?.ok === false) {
     const msg =
       json?.error?.message ||
       (res.status === 404 ? "Session not found" :
-       res.status === 409 ? "Session is closed" :
+       res.status === 409 ? "Session is not open" :
+       res.status === 412 ? "All players must be ready" :
        `Request failed (HTTP ${res.status})`);
     throw new Error(msg);
   }
   return json?.data ?? json;
 }
 
-const CODE_RE = /^[A-HJ-KMNP-Z2-9]{5}$/i; // excludes I, L, O, 0, 1 for clarity
+const CODE_RE = /^[A-HJ-KMNP-Z2-9]{5}$/i;
+
+function Banner({ kind="error", text }) {
+  if (!text) return null;
+  const bg = kind === "error" ? "#fee2e2" : "#dcfce7";
+  const bd = kind === "error" ? "#fca5a5" : "#86efac";
+  const color = kind === "error" ? "#991b1b" : "#14532d";
+  return (
+    <View style={{ backgroundColor: bg, borderColor: bd, borderWidth: 1, padding: 8, borderRadius: 6, marginTop: 8 }}>
+      <Text style={{ color }}>{text}</Text>
+    </View>
+  );
+}
 
 function HomeScreen({ navigation }) {
   const [name, setName] = useState("GM");
   const [code, setCode] = useState("");
   const [err, setErr] = useState("");
+  const [info, setInfo] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const onHealth = async () => {
+    setErr(""); setInfo("");
+    try {
+      setBusy(true);
+      const data = await api("/health", { method: "GET" });
+      setInfo(`Connected to ${API_BASE} · ${new Date(data.time).toLocaleTimeString()}`);
+    } catch (e) { setErr(String(e.message || e)); }
+    finally { setBusy(false); }
+  };
 
   const onCreate = async () => {
-    setErr("");
+    setErr(""); setInfo("");
     try {
+      setBusy(true);
       const data = await api("/create-session", {
         method: "POST",
         body: JSON.stringify({ name: name.trim() || "GM" }),
@@ -49,23 +70,17 @@ function HomeScreen({ navigation }) {
         playerId: data.players[0].id,
         isGM: true,
       });
-    } catch (e) {
-      setErr(String(e.message || e));
-    }
+    } catch (e) { setErr(String(e.message || e)); }
+    finally { setBusy(false); }
   };
 
   const onJoin = async () => {
-    setErr("");
+    setErr(""); setInfo("");
     const cleaned = code.trim().toUpperCase();
-    if (!CODE_RE.test(cleaned)) {
-      setErr("Enter a valid 5-character code (A–Z, 2–9).");
-      return;
-    }
-    if (!name.trim()) {
-      setErr("Please enter your display name.");
-      return;
-    }
+    if (!CODE_RE.test(cleaned)) { setErr("Enter a valid 5-character code (A–Z, 2–9)."); return; }
+    if (!name.trim()) { setErr("Please enter your display name."); return; }
     try {
+      setBusy(true);
       const data = await api("/join-session", {
         method: "POST",
         body: JSON.stringify({ code: cleaned, name: name.trim() }),
@@ -75,44 +90,34 @@ function HomeScreen({ navigation }) {
         playerId: data.player.id,
         isGM: false,
       });
-    } catch (e) {
-      setErr(String(e.message || e));
-    }
+    } catch (e) { setErr(String(e.message || e)); }
+    finally { setBusy(false); }
   };
 
   return (
     <SafeAreaView style={{ flex: 1, padding: 16, gap: 12 }}>
       <Text style={{ fontSize: 24, fontWeight: "700" }}>Ashwood & Co. — Lobby</Text>
-
-      {!!err && (
-        <View style={{ backgroundColor: "#fee2e2", borderColor: "#fca5a5", borderWidth: 1, padding: 8, borderRadius: 6 }}>
-          <Text style={{ color: "#991b1b" }}>{err}</Text>
-        </View>
-      )}
+      <Text style={{ color: "#6b7280" }}>API: {API_BASE}</Text>
+      <Banner kind="error" text={err} />
+      <Banner kind="info" text={info} />
 
       <Text style={{ marginTop: 8 }}>Your Name</Text>
-      <TextInput
-        value={name}
-        onChangeText={setName}
-        placeholder="Enter your display name"
-        style={{ borderWidth: 1, padding: 10, borderRadius: 8 }}
-      />
+      <TextInput value={name} onChangeText={setName} placeholder="Enter your display name" style={{ borderWidth: 1, padding: 10, borderRadius: 8 }} />
 
       <View style={{ height: 8 }} />
-      <Button title="Create Game (GM)" onPress={onCreate} />
+      <Button title={busy ? "Working..." : "Create Game (GM)"} onPress={onCreate} disabled={busy} />
 
       <View style={{ height: 16 }} />
       <Text>Join by Code</Text>
-      <TextInput
-        value={code}
-        onChangeText={(t) => setCode(t.toUpperCase())}
-        placeholder="ABCDE"
-        autoCapitalize="characters"
-        maxLength={5}
-        style={{ borderWidth: 1, padding: 10, borderRadius: 8, letterSpacing: 4 }}
-      />
+      <TextInput value={code} onChangeText={(t) => setCode(t.toUpperCase())} placeholder="ABCDE" autoCapitalize="characters" maxLength={5}
+        style={{ borderWidth: 1, padding: 10, borderRadius: 8, letterSpacing: 4 }} />
       <View style={{ height: 8 }} />
-      <Button title="Join Game" onPress={onJoin} />
+      <Button title={busy ? "Working..." : "Join Game"} onPress={onJoin} disabled={busy} />
+
+      <View style={{ height: 16 }} />
+      <TouchableOpacity onPress={onHealth} disabled={busy} style={{ padding: 8, borderWidth: 1, borderRadius: 8, alignSelf: "flex-start" }}>
+        <Text>{busy ? "Checking..." : "Check Connection"}</Text>
+      </TouchableOpacity>
     </SafeAreaView>
   );
 }
@@ -125,93 +130,62 @@ function Badge({ text, bg = "#e5e7eb", color = "#111827" }) {
   );
 }
 
-function Row({ children }) {
-  return <View style={{ paddingVertical: 10, borderBottomWidth: 1, borderColor: "#eee" }}>{children}</View>;
-}
+function Row({ children }) { return <View style={{ paddingVertical: 10, borderBottomWidth: 1, borderColor: "#eee" }}>{children}</View>; }
 
 function LobbyScreen({ route, navigation }) {
   const { code, playerId, isGM } = route.params;
   const [session, setSession] = useState(null);
   const [err, setErr] = useState("");
   const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
   const pollRef = useRef(null);
 
   const load = async () => {
     try {
       const data = await api(`/lobby/${code}`, { method: "GET" });
-      setSession(data);
-      setErr("");
-    } catch (e) {
-      setErr(String(e.message || e));
-    }
+      setSession(data); setErr("");
+      if (data?.status === "in_progress") {
+        navigation.replace("HoldingRoom", { code, playerId, isGM });
+      }
+    } catch (e) { setErr(String(e.message || e)); }
   };
 
   useEffect(() => {
     load();
+    if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(load, 2000);
-    return () => clearInterval(pollRef.current);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
 
-  const setReady = async (ready) => {
-    try {
-      await api(`/lobby/${code}/ready`, {
-        method: "POST",
-        body: JSON.stringify({ playerId, ready }),
-      });
-      load();
-    } catch (e) {
-      setErr(String(e.message || e));
-    }
-  };
+  const withBusy = (fn) => async (...args) => { try { setBusy(true); await fn(...args); } finally { setBusy(false); } };
 
-  const leave = async () => {
-    try {
-      await api(`/lobby/${code}/leave`, {
-        method: "POST",
-        body: JSON.stringify({ playerId }),
-      });
-      navigation.popToTop();
-    } catch (e) {
-      setErr(String(e.message || e));
-    }
-  };
+  const setReady = withBusy(async (ready) => {
+    await api(`/lobby/${code}/ready`, { method: "POST", body: JSON.stringify({ playerId, ready }) });
+    load();
+  });
 
-  const gmReset = async () => {
-    try {
-      await api(`/lobby/${code}/reset`, { method: "POST" });
-      load();
-    } catch (e) {
-      setErr(String(e.message || e));
-    }
-  };
-  const gmClose = async () => {
-    try {
-      await api(`/lobby/${code}/close`, { method: "POST" });
-      load();
-    } catch (e) {
-      setErr(String(e.message || e));
-    }
-  };
-  const gmReopen = async () => {
-    try {
-      await api(`/lobby/${code}/reopen`, { method: "POST" });
-      load();
-    } catch (e) {
-      setErr(String(e.message || e));
-    }
-  };
+  const leave = withBusy(async () => {
+    await api(`/lobby/${code}/leave`, { method: "POST", body: JSON.stringify({ playerId }) });
+    navigation.popToTop();
+  });
+
+  const gmReset  = withBusy(async () => { await api(`/lobby/${code}/reset`,  { method: "POST" }); load(); });
+  const gmClose  = withBusy(async () => { await api(`/lobby/${code}/close`,  { method: "POST" }); load(); });
+  const gmReopen = withBusy(async () => { await api(`/lobby/${code}/reopen`, { method: "POST" }); load(); });
+
+  const startGame = withBusy(async () => {
+    await api(`/lobby/${code}/start`, { method: "POST" });
+    // load() will pick up the new status via polling, but we navigate immediately for snappier UX:
+    navigation.replace("HoldingRoom", { code, playerId, isGM });
+  });
 
   const copyCode = async () => {
-    try {
-      await Clipboard.setStringAsync(code);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      Alert.alert("Copy Failed", "Could not copy the code to clipboard.");
-    }
+    try { await Clipboard.setStringAsync(code); setCopied(true); setTimeout(() => setCopied(false), 1500); }
+    catch { Alert.alert("Copy Failed", "Could not copy the code to clipboard."); }
   };
 
-  const me = session?.players?.find?.((p) => p.id === playerId);
+  const players = session?.players ?? [];
+  const allReady = players.length > 0 && players.every(p => p.ready);
 
   return (
     <SafeAreaView style={{ flex: 1, padding: 16 }}>
@@ -222,19 +196,15 @@ function LobbyScreen({ route, navigation }) {
         </TouchableOpacity>
       </View>
 
-      {!!err && (
-        <View style={{ marginTop: 8, backgroundColor: "#fee2e2", borderColor: "#fca5a5", borderWidth: 1, padding: 8, borderRadius: 6 }}>
-          <Text style={{ color: "#991b1b" }}>{err}</Text>
-        </View>
-      )}
+      <Banner kind="error" text={err} />
 
       <View style={{ height: 10 }} />
       <Text>Status: {session?.status ?? "…"}</Text>
-      <Text>Players: {session?.players?.length ?? 0}</Text>
+      <Text>Players: {players.length}</Text>
 
       <View style={{ height: 10 }} />
       <FlatList
-        data={session?.players ?? []}
+        data={players}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => {
           const isYou = item.id === playerId;
@@ -256,23 +226,45 @@ function LobbyScreen({ route, navigation }) {
 
       <View style={{ height: 12 }} />
 
-      <View style={{ flexDirection: "row", gap: 8, justifyContent: "space-between" }}>
-        <Button title="I'm Ready" onPress={() => setReady(true)} />
-        <Button title="Not Ready" onPress={() => setReady(false)} />
-        <Button title="Leave" color="#a00" onPress={leave} />
+      <View style={{ flexDirection: "row", gap: 8, justifyContent: "space-between", alignItems: "center" }}>
+        <Button title="I'm Ready" onPress={() => setReady(true)} disabled={busy} />
+        <Button title="Not Ready" onPress={() => setReady(false)} disabled={busy} />
+        {busy && <ActivityIndicator />}
+        <Button title="Leave" color="#a00" onPress={leave} disabled={busy} />
       </View>
 
       {isGM && (
         <>
           <View style={{ height: 16 }} />
           <Text style={{ fontWeight: "700" }}>GM Controls</Text>
-          <View style={{ flexDirection: "row", gap: 8, justifyContent: "space-between" }}>
-            <Button title="Reset Lobby" onPress={gmReset} />
-            <Button title="Close Lobby" onPress={gmClose} />
-            <Button title="Reopen Lobby" onPress={gmReopen} />
+          <View style={{ flexDirection: "row", gap: 8, justifyContent: "space-between", alignItems: "center" }}>
+            <Button title="Reset" onPress={gmReset} disabled={busy} />
+            <Button title="Close" onPress={gmClose} disabled={busy} />
+            <Button title="Reopen" onPress={gmReopen} disabled={busy} />
           </View>
+
+          <View style={{ height: 10 }} />
+          <Button
+            title={allReady ? "Start Game" : "Start Game (all players must be ready)"}
+            onPress={startGame}
+            disabled={!allReady || busy}
+          />
         </>
       )}
+    </SafeAreaView>
+  );
+}
+
+function HoldingRoomScreen({ route }) {
+  const { code } = route.params;
+  return (
+    <SafeAreaView style={{ flex: 1, padding: 16, alignItems: "center", justifyContent: "center" }}>
+      <Text style={{ fontSize: 26, fontWeight: "800", marginBottom: 8 }}>Holding Room</Text>
+      <Text style={{ marginBottom: 12 }}>Session: {code}</Text>
+      <Text style={{ color: "#6b7280", textAlign: "center" }}>
+        Everyone is in. This is the staging area before the first scene.
+        (Next step will wire character handoffs and the first room.)
+      </Text>
     </SafeAreaView>
   );
 }
@@ -285,6 +277,7 @@ export default function App() {
       <Stack.Navigator>
         <Stack.Screen name="Home" component={HomeScreen} options={{ title: "Ashwood & Co." }} />
         <Stack.Screen name="Lobby" component={LobbyScreen} options={{ title: "Lobby" }} />
+        <Stack.Screen name="HoldingRoom" component={HoldingRoomScreen} options={{ title: "Holding Room" }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

@@ -1,11 +1,6 @@
 ﻿/**
  * Ashwood Proxy (8787) — Fresh Lobby Service
  * Single router. Stable JSON contract. In-memory sessions for dev.
- * Requirements honored:
- *  - Characters unclaimed on first open (no claim logic yet; lobby only)
- *  - GM can reset/close a lobby (clear state and reuse code)
- *  - Avoid stale state/caching; explicit endpoints with clear payloads
- *  - Only one router mount
  */
 
 const express = require("express");
@@ -20,18 +15,14 @@ app.use(cors());
 app.use(express.json());
 app.use(morgan("dev"));
 
-// ------------------------------
-// In-memory session store (DEV)
-// ------------------------------
 /**
  * sessions: Map<code, {
  *   code: string,
- *   status: 'open' | 'closed',
+ *   status: 'open' | 'closed' | 'in_progress',
  *   createdAt: number,
+ *   startedAt?: number,
  *   version: number,
- *   players: Array<{
- *     id: string, name: string, ready: boolean, joinedAt: number, role: 'gm' | 'player'
- *   }>
+ *   players: Array<{ id: string, name: string, ready: boolean, joinedAt: number, role: 'gm' | 'player' }>
  * }>
  */
 const sessions = new Map();
@@ -47,38 +38,30 @@ const genCode = () => {
 const ok = (data) => ({ ok: true, data });
 const err = (message, code = "BAD_REQUEST") => ({ ok: false, error: { code, message } });
 
-// Single router mount (requirement)
 const router = express.Router();
 
 // Health
-router.get("/health", (req, res) => {
-  res.json(ok({ service: "ashwood-lobby", time: Date.now() }));
-});
+router.get("/health", (req, res) => res.json(ok({ service: "ashwood-lobby", time: Date.now() })));
 
 // Create a new session (GM)
 router.post("/create-session", (req, res) => {
   let code;
   do { code = genCode(); } while (sessions.has(code));
-
   const gmName = (req.body && req.body.name) || "GM";
   const now = Date.now();
-
   const session = {
     code,
     status: "open",
     createdAt: now,
     version: 1,
-    players: [
-      {
-        id: randomUUID(),
-        name: gmName,
-        ready: false,
-        joinedAt: now,
-        role: "gm",
-      },
-    ],
+    players: [{
+      id: randomUUID(),
+      name: gmName,
+      ready: false,
+      joinedAt: now,
+      role: "gm",
+    }],
   };
-
   sessions.set(code, session);
   res.json(ok(session));
 });
@@ -87,18 +70,10 @@ router.post("/create-session", (req, res) => {
 router.post("/join-session", (req, res) => {
   const { code, name } = req.body || {};
   if (!code || !name) return res.status(400).json(err("code and name are required"));
-
-  const session = sessions.get(code.toUpperCase());
+  const session = sessions.get(String(code).toUpperCase());
   if (!session) return res.status(404).json(err("session not found", "NOT_FOUND"));
-  if (session.status !== "open") return res.status(409).json(err("session is closed", "SESSION_CLOSED"));
-
-  const player = {
-    id: randomUUID(),
-    name,
-    ready: false,
-    joinedAt: Date.now(),
-    role: "player",
-  };
+  if (session.status !== "open") return res.status(409).json(err("session is not open", "SESSION_NOT_OPEN"));
+  const player = { id: randomUUID(), name, ready: false, joinedAt: Date.now(), role: "player" };
   session.players.push(player);
   session.version++;
   res.json(ok({ session, player }));
@@ -116,15 +91,11 @@ router.get("/lobby/:code", (req, res) => {
 router.post("/lobby/:code/ready", (req, res) => {
   const code = req.params.code.toUpperCase();
   const { playerId, ready } = req.body || {};
-  if (!playerId || typeof ready !== "boolean") {
-    return res.status(400).json(err("playerId and ready:boolean are required"));
-  }
+  if (!playerId || typeof ready !== "boolean") return res.status(400).json(err("playerId and ready:boolean are required"));
   const session = sessions.get(code);
   if (!session) return res.status(404).json(err("session not found", "NOT_FOUND"));
-
   const p = session.players.find(x => x.id === playerId);
   if (!p) return res.status(404).json(err("player not found", "NOT_FOUND"));
-
   p.ready = ready;
   session.version++;
   res.json(ok(session));
@@ -137,46 +108,56 @@ router.post("/lobby/:code/leave", (req, res) => {
   if (!playerId) return res.status(400).json(err("playerId is required"));
   const session = sessions.get(code);
   if (!session) return res.status(404).json(err("session not found", "NOT_FOUND"));
-
   const before = session.players.length;
   session.players = session.players.filter(p => p.id !== playerId);
-  if (session.players.length !== before) {
-    session.version++;
-  }
+  if (session.players.length !== before) session.version++;
   res.json(ok(session));
 });
 
-// GM: close session (no new joins)
+// GM: close / reopen / reset
 router.post("/lobby/:code/close", (req, res) => {
   const code = req.params.code.toUpperCase();
   const session = sessions.get(code);
   if (!session) return res.status(404).json(err("session not found", "NOT_FOUND"));
-  session.status = "closed";
-  session.version++;
+  session.status = "closed"; session.version++;
   res.json(ok(session));
 });
 
-// GM: reopen session
 router.post("/lobby/:code/reopen", (req, res) => {
   const code = req.params.code.toUpperCase();
   const session = sessions.get(code);
   if (!session) return res.status(404).json(err("session not found", "NOT_FOUND"));
-  session.status = "open";
-  session.version++;
+  session.status = "open"; session.version++;
   res.json(ok(session));
 });
 
-// GM: reset session (clear players except GM; clear readies)
 router.post("/lobby/:code/reset", (req, res) => {
   const code = req.params.code.toUpperCase();
   const session = sessions.get(code);
   if (!session) return res.status(404).json(err("session not found", "NOT_FOUND"));
-
-  // keep the earliest GM (first gm) if exists
   const gm = session.players.find(p => p.role === "gm") || null;
   const now = Date.now();
   session.players = gm ? [{ ...gm, ready: false, joinedAt: now }] : [];
   session.status = "open";
+  delete session.startedAt;
+  session.version++;
+  res.json(ok(session));
+});
+
+// GM: start game — all players must be ready, lobby must be open
+router.post("/lobby/:code/start", (req, res) => {
+  const code = req.params.code.toUpperCase();
+  const session = sessions.get(code);
+  if (!session) return res.status(404).json(err("session not found", "NOT_FOUND"));
+  if (session.status !== "open") return res.status(409).json(err("session is not open", "SESSION_NOT_OPEN"));
+
+  const players = session.players || [];
+  if (players.length === 0) return res.status(412).json(err("cannot start: no players", "NO_PLAYERS"));
+  const allReady = players.every(p => p.ready === true);
+  if (!allReady) return res.status(412).json(err("cannot start: all players must be ready", "PLAYERS_NOT_READY"));
+
+  session.status = "in_progress";
+  session.startedAt = Date.now();
   session.version++;
   res.json(ok(session));
 });
